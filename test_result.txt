@@ -1,0 +1,152 @@
+=== 1. causality: nothing happens before the player exists (both must be 0) ===
+ sessions_before_registration 
+------------------------------
+                            0
+(1 row)
+
+ deposits_before_registration 
+------------------------------
+                            0
+(1 row)
+
+=== 2. shared devices: honest households (expect 346 devices, 4 shared) ===
+ devices_total | devices_shared 
+---------------+----------------
+          9594 |            156
+(1 row)
+
+ players_on_device | devices 
+-------------------+---------
+                 1 |    9438
+                 2 |     152
+                 3 |       4
+(3 rows)
+
+              device_id               | players |    player_ids    
+--------------------------------------+---------+------------------
+ 57264d75-9734-49d8-af5c-e83c52c27691 |       3 | {422,2198,3919}
+ a31f6c0f-ca66-48b7-9616-57a8163dcf6f |       3 | {102,397,5296}
+ a6ecb7ad-5d34-4539-81f5-fbc6b4cb8f3f |       3 | {4226,5111,8148}
+ b10d3e9d-5c9a-4b37-8eb2-e75d81bdcf85 |       3 | {1154,2042,7155}
+ 002bc345-ceeb-4f33-8e1a-80d336e85013 |       2 | {395,3437}
+ 057b411c-5af7-4d3d-a7ad-92f4ec4fbe8b |       2 | {3357,9741}
+ 0639c139-530a-483a-a3c6-71145ee88414 |       2 | {7032,8298}
+ 06501862-4803-455f-b304-808db49941fd |       2 | {2666,3895}
+ 07f8c7ed-c9c9-48d9-9dd7-9a4b5a252b48 |       2 | {1676,5430}
+ 0815a485-add0-4e0c-8412-3fb15eb6c3ea |       2 | {198,282}
+(10 rows)
+
+=== 3. odds drift (expect 497 selections, 2547 rows, max 14 changes) ===
+ selections | odds_rows | most_changes_on_one_selection 
+------------+-----------+-------------------------------
+       7497 |     69700 |                            22
+(1 row)
+
+ selections | avg_drift | biggest_move 
+------------+-----------+--------------
+       7497 |   -0.0040 |         1.75
+(1 row)
+
+=== 4. deposit processing time (expect 474 deposits, min 5s, avg 298.0s, max 599s) ===
+ deposits | min_seconds | avg_seconds | max_seconds 
+----------+-------------+-------------+-------------
+   107856 |           5 |       302.5 |         600
+(1 row)
+
+=== 5. bets (expect 982 bets, avg stake 20.86, avg odds 9.58) ===
+  bets  | avg_stake | avg_odds |  turnover   
+--------+-----------+----------+-------------
+ 649790 |     36.18 |     8.62 | 23506636.03
+(1 row)
+
+ legs |  bets  
+------+--------
+    1 | 454546
+    2 |  64792
+    3 |  64990
+    4 |  65462
+(4 rows)
+
+ late_bets 
+-----------
+         0
+(1 row)
+
+ wrong_total_odds 
+------------------
+                0
+(1 row)
+
+ players_overdrawn 
+-------------------
+                 0
+(1 row)
+
+ moments_with_negative_balance 
+-------------------------------
+                             0
+(1 row)
+
+=== 6. settlement (expect 41 of 71 events finished, 521 settlements) ===
+ finished | still_scheduled | events 
+----------+-----------------+--------
+     1041 |              30 |   1071
+(1 row)
+
+ status |  bets  
+--------+--------
+ lost   | 423325
+ open   |  18173
+ won    | 208292
+(3 rows)
+
+ result | settlements |    paid     
+--------+-------------+-------------
+ lost   |      423325 |        0.00
+ won    |      208292 | 20908564.30
+(2 rows)
+
+ wrong_payouts 
+---------------
+             0
+(1 row)
+
+ losers_paid | bets_settled_twice 
+-------------+--------------------
+           0 |                  0
+(1 row)
+
+ settled_too_early 
+-------------------
+                 0
+(1 row)
+
+ settled_bets |   stakes    |   payouts   | margin 
+--------------+-------------+-------------+--------
+       631617 | 22838052.78 | 20908564.30 | 0.0845
+(1 row)
+
+=== 7. withdrawals (expect 56: 38 approved, 18 still pending) ===
+ direction  |  status  | count |     sum     
+------------+----------+-------+-------------
+ deposit    | approved | 99163 | 11927061.87
+ deposit    | rejected |  8693 |  1052758.70
+ withdrawal | approved | 49622 |  8232934.03
+ withdrawal | pending  |   812 |   142133.30
+(4 rows)
+
+ pending_rule_broken 
+---------------------
+                   0
+(1 row)
+
+  deposited  | withdrawn  
+-------------+------------
+ 11927061.87 | 8375067.33
+(1 row)
+
+ min_hours | avg_hours | max_hours 
+-----------+-----------+-----------
+       1.0 |      12.5 |      24.0
+(1 row)
+
