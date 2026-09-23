@@ -31,8 +31,8 @@ apart from "broken by accident".
 | 2 | `MULTI_ACCOUNT` | player | planned | linked accounts |
 | 3 | `PASSTHROUGH` | transaction | planned | turnover ratio |
 | 4 | `CARD_TESTING` | transaction | planned | deposit velocity |
-| 5 | `LATE_BET` | bet | planned | late bet |
-| 6 | `STAKE_ESCALATION` | bet | planned | stake anomaly |
+| 5 | `LATE_BET` | bet | **done** | late bet |
+| 6 | `STAKE_ESCALATION` | bet | **done** | stake anomaly |
 | 7 | `MATCHED_BETTING` | bet | planned | opposing bets |
 | 8 | `BONUS_ABUSE` | player | blocked | bonus abuse |
 
@@ -106,7 +106,7 @@ the generator can create extra payment methods for the tester.
 
 ---
 
-## 5. `LATE_BET` — planned
+## 5. `LATE_BET` — done
 
 A bet timestamped after `events.start_time`, or priced against stale odds.
 
@@ -115,22 +115,59 @@ A bet timestamped after `events.start_time`, or priced against stale odds.
 **Baseline is clean:** on 649,790 honest bets at 90 days this returns 0. Anything it
 returns after injection is either planted or a generator bug.
 
-**Watch out:** the generator structurally prevents late bets (`load_open_selections`
-only offers matches starting after the current hour), so the injector has to write
-these deliberately, bypassing that path.
+**What the generator does.** `fraud.maybe_late_bets()` runs after normal betting.
+At `LATE_BET_RATE` (0.01 per active player per hour) a player backs a single
+selection on a match that has already kicked off but is not over — priced at the
+last pre-match odds, because `move_odds` stops touching a selection once its match
+starts. That staleness is exactly what a late bettor is after.
+
+The bet lands strictly between kickoff and the final whistle
+(`config.MATCH_MINUTES`). An earlier version let it land up to ten minutes after the
+match ended, which broke a harder rule: settlement is timestamped from
+`finished_at`, so those bets were settled *before* they were placed. The
+`settled_too_early` check caught it. A deliberate post-match variant would be a
+stronger pattern and is worth adding later — but then settlement has to timestamp
+itself after the bet, which `settle_bets` now does.
+
+**Labels.** `entity_type = 'bet'`, `details` carries `event_id`,
+`seconds_after_kickoff` and `odds_at_placement`.
+
+**Known gap.** A real late bettor bets *because* they already know something — a
+goal has gone in. Ours picks a selection at random, so planted late bets win at
+roughly the honest rate. Biasing them toward the eventual winner would add a second
+detectable signal (an abnormal win rate) and make the pattern more realistic. It
+needs the final score to be drawn at fixture creation instead of at settlement.
 
 ---
 
-## 6. `STAKE_ESCALATION` — planned
+## 6. `STAKE_ESCALATION` — done
 
 Weeks of small bets, then one very large one — the shape of an account takeover.
 
 **The rule.** `stake / AVG(stake) OVER (PARTITION BY player_id ORDER BY placed_at
 ROWS BETWEEN 50 PRECEDING AND 1 PRECEDING)`.
 
-**Honest noise it has to compete with:** high-rollers stake log-normally, so large
-bets happen legitimately all the time. This is the pattern where the threshold
-actually has to be earned from the data.
+**What the generator does.** `fraud.maybe_stake_escalation()` needs a player with a
+real history (`ESCALATION_MIN_BETS`, 15 bets) *and* a balance worth emptying
+(`ESCALATION_MIN_MULTIPLE`, 8x their own average stake). Only about 6% of active
+player-hours qualify, which is why `STAKE_ESCALATION_RATE` is 0.10 — far higher than
+the other patterns, for a comparable number of plants. The bet is a single, staked at
+10-40x the player's running average, capped by the balance.
+
+**Labels.** `entity_type = 'bet'`, `details` carries `average_stake`, `stake`,
+`multiple_of_average` and `bets_before`.
+
+**The point of this one.** At 14 days, 17 of the 26 planted bets are *smaller* than
+the 20th biggest honest bet in the database. An absolute threshold ("flag stakes over
+500") cannot separate them from honest high-rollers at any level. Only a per-player
+comparison can - which is exactly what the window function in the stake-anomaly rule
+is for:
+
+    stake / AVG(stake) OVER (PARTITION BY player_id ORDER BY placed_at
+                             ROWS BETWEEN 50 PRECEDING AND 1 PRECEDING)
+
+**Known gap.** A real takeover usually comes with a new device or IP. These bets come
+from the player's normal session, so that second signal is not there.
 
 ---
 

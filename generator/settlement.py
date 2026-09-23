@@ -52,7 +52,7 @@ def finish_events(conn, hour, event_probs):
         conn.execute("UPDATE markets SET status = 'settled' WHERE event_id = %s", (event_id,))
         conn.execute(
             "UPDATE events SET status = 'finished', finished_at = %s WHERE id = %s",
-            (start_time + timedelta(minutes=110), event_id),
+            (start_time + timedelta(minutes=config.MATCH_MINUTES), event_id),
         )
 
 
@@ -79,7 +79,7 @@ def settle_bets(conn, hour, balances):
     """Pay every open bet whose legs are all decided."""
     ready = conn.execute(
         """
-        SELECT b.id, b.player_id, b.stake, b.total_odds,
+        SELECT b.id, b.player_id, b.stake, b.total_odds, b.placed_at,
                bool_and(s.status = 'won') AS all_won,
                max(e.finished_at)         AS last_finish
         FROM bets b
@@ -88,13 +88,13 @@ def settle_bets(conn, hour, balances):
         JOIN markets m         ON m.id = s.market_id
         JOIN events e          ON e.id = m.event_id
         WHERE b.status = 'open'
-        GROUP BY b.id, b.player_id, b.stake, b.total_odds
+        GROUP BY b.id, b.player_id, b.stake, b.total_odds, b.placed_at
         HAVING bool_and(s.status <> 'open')
         ORDER BY b.id
         """
     ).fetchall()
 
-    for bet_id, player_id, stake, total_odds, all_won, last_finish in ready:
+    for bet_id, player_id, stake, total_odds, placed_at, all_won, last_finish in ready:
         if all_won:
             result = "won"
             payout = (stake * total_odds).quantize(Decimal("0.01"))
@@ -102,8 +102,13 @@ def settle_bets(conn, hour, balances):
             result = "lost"
             payout = Decimal("0.00")
 
-        # the operator pays out a minute or ten after the last match ends
-        settled_at = min(last_finish + timedelta(seconds=random.randint(60, 600)), hour)
+        # The operator pays out a minute or ten after the last match ends - but never
+        # before the bet was placed. A LATE_BET can be written after the final whistle,
+        # and a settlement timestamped earlier than its own bet is nonsense.
+        settled_at = min(
+            max(last_finish, placed_at) + timedelta(seconds=random.randint(60, 600)),
+            hour,
+        )
 
         payout, planted = fraud.break_settlement(result, payout, stake, total_odds)
 

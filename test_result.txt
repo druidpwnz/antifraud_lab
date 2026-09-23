@@ -12,63 +12,63 @@
 === 2. shared devices: honest households (expect 1467 devices, 26 shared) ===
  devices_total | devices_shared 
 ---------------+----------------
-          1547 |             25
+          1436 |             27
 (1 row)
 
  players_on_device | devices 
 -------------------+---------
-                 1 |    1522
-                 2 |      25
+                 1 |    1409
+                 2 |      27
 (2 rows)
 
               device_id               | players | player_ids  
 --------------------------------------+---------+-------------
- 0affaabd-7704-48c5-8ca7-fc45c5d1e0db |       2 | {483,505}
- 138da5f7-f7b5-438e-9b63-c049c1034389 |       2 | {692,1290}
- 1c770f78-1e83-44b8-aba6-29751a7bfd28 |       2 | {573,703}
- 20793a98-f94c-4458-9aff-badc7754cdfc |       2 | {132,489}
- 34721414-b568-4693-8286-e4020d0b1341 |       2 | {206,1473}
- 41723476-cbc4-4ede-9628-fe63af2f91fe |       2 | {452,1084}
- 4eac2700-8246-409d-90de-327dbad4c3a1 |       2 | {434,1318}
- 56d44952-ee29-480e-be2a-c03a80f58b81 |       2 | {34,546}
- 597d2966-0ffd-4c8b-9fb3-3d8ab00195f6 |       2 | {1004,1544}
- 5dd77e6d-ca8c-4121-b9cd-13e507dc3da8 |       2 | {913,1170}
+ 03a3c94f-074d-4890-8fba-d3c121d735e2 |       2 | {580,1136}
+ 0d544552-0f27-483f-b6a7-01e9392b790f |       2 | {1397,1422}
+ 10ee60a3-ab46-41be-8517-c4efa5783919 |       2 | {214,853}
+ 1a039e22-9a3e-4d70-a092-feb1a52ee707 |       2 | {503,1256}
+ 1e7d8f7b-8d59-434d-84bd-604fb5502e2b |       2 | {66,280}
+ 257a2970-5764-4192-9316-8988639538da |       2 | {440,547}
+ 2dfa753b-9214-4af8-8573-26fda3a2f7f5 |       2 | {299,930}
+ 2f45428a-5ba3-4762-a6ae-d15d2ab7fb10 |       2 | {155,174}
+ 31dc11ba-177c-4886-bf86-f439ad48bf3b |       2 | {879,990}
+ 39e4ad0c-ae8e-4d15-ad95-193231c6de11 |       2 | {510,970}
 (10 rows)
 
 === 3. odds drift (expect 1316 selections, 10783 rows, max 19 changes) ===
  selections | odds_rows | most_changes_on_one_selection 
 ------------+-----------+-------------------------------
-       1295 |     10552 |                            18
+       1337 |     11087 |                            19
 (1 row)
 
  selections | avg_drift | biggest_move 
 ------------+-----------+--------------
-       1295 |    0.0098 |         1.25
+       1337 |    0.0032 |         1.45
 (1 row)
 
 === 4. deposit processing time (expect 4003 deposits, min 5s, avg 302.4s, max 600s) ===
  deposits | min_seconds | avg_seconds | max_seconds 
 ----------+-------------+-------------+-------------
-     4225 |           5 |       297.9 |         600
+     4109 |           5 |       302.1 |         600
 (1 row)
 
 === 5. bets (expect 15206 bets, avg stake 29.34, avg odds 8.40) ===
  bets  | avg_stake | avg_odds | turnover  
 -------+-----------+----------+-----------
- 16148 |     29.41 |     8.47 | 474906.94
+ 15234 |     29.98 |     8.98 | 456785.42
 (1 row)
 
  legs | bets  
 ------+-------
-    1 | 11431
-    2 |  1536
-    3 |  1619
-    4 |  1562
+    1 | 10633
+    2 |  1511
+    3 |  1594
+    4 |  1496
 (4 rows)
 
- late_bets 
------------
-         0
+ unlabelled_late_bets 
+----------------------
+                    0
 (1 row)
 
  wrong_total_odds 
@@ -89,20 +89,20 @@
 === 6. settlement (expect 158 of 188 events finished, 12783 settlements) ===
  finished | still_scheduled | events 
 ----------+-----------------+--------
-      155 |              30 |    185
+      161 |              30 |    191
 (1 row)
 
  status | bets 
 --------+------
- lost   | 8920
- open   | 2749
- won    | 4479
+ lost   | 8400
+ open   | 2568
+ won    | 4266
 (3 rows)
 
  result | settlements |   paid    
 --------+-------------+-----------
- lost   |        8920 |  21356.36
- won    |        4479 | 343611.89
+ lost   |        8400 |   8963.17
+ won    |        4266 | 330174.21
 (2 rows)
 
  unlabelled_wrong_payouts 
@@ -122,16 +122,16 @@
 
  settled_bets |  stakes   |  payouts  | margin 
 --------------+-----------+-----------+--------
-        13399 | 394742.21 | 364968.25 | 0.0754
+        12666 | 376614.28 | 339137.38 | 0.0995
 (1 row)
 
 === 7. withdrawals (expect 1115: 1005 approved, 110 still pending) ===
  direction  |  status  | count |    sum    
 ------------+----------+-------+-----------
- deposit    | approved |  3887 | 369169.11
- deposit    | rejected |   338 |  29663.10
- withdrawal | approved |  1031 | 125108.37
- withdrawal | pending  |   120 |  12160.38
+ deposit    | approved |  3781 | 353514.08
+ deposit    | rejected |   328 |  36242.32
+ withdrawal | approved |   982 | 112861.18
+ withdrawal | pending  |   117 |  15714.80
 (4 rows)
 
  pending_rule_broken 
@@ -141,30 +141,42 @@
 
  deposited | withdrawn 
 -----------+-----------
- 369169.11 | 137268.75
+ 353514.08 | 128575.98
 (1 row)
 
  min_hours | avg_hours | max_hours 
 -----------+-----------+-----------
-       1.0 |      12.3 |      24.0
+       1.0 |      12.2 |      24.0
 (1 row)
 
 === 8. planted fraud (ground truth - rules/ must never read this table) ===
-   pattern_code   |    variant    | planted 
-------------------+---------------+---------
- SETTLEMENT_ERROR | lost_bet_paid |      46
- SETTLEMENT_ERROR | wrong_amount  |      29
-(2 rows)
+   pattern_code   | entity_type |    variant    | planted 
+------------------+-------------+---------------+---------
+ LATE_BET         | bet         |               |      28
+ SETTLEMENT_ERROR | settlement  | lost_bet_paid |      31
+ SETTLEMENT_ERROR | settlement  | wrong_amount  |      24
+ STAKE_ESCALATION | bet         |               |      23
+(4 rows)
+
+ planted | avg_multiple | smallest | biggest | honest_bets_that_are_bigger 
+---------+--------------+----------+---------+-----------------------------
+      23 |         12.9 |    86.07 | 1874.25 |                        1418
+(1 row)
+
+ planted | avg_minutes_late | won | not_settled_yet 
+---------+------------------+-----+-----------------
+      28 |               72 |   9 |               0
+(1 row)
 
     variant    | planted | visible_to_the_won_bet_rule | invisible 
 ---------------+---------+-----------------------------+-----------
- lost_bet_paid |      46 |                           0 |        46
- wrong_amount  |      29 |                          29 |         0
+ lost_bet_paid |      31 |                           0 |        31
+ wrong_amount  |      24 |                          24 |         0
 (2 rows)
 
     variant    | actually_paid | should_have_paid | overpaid 
 ---------------+---------------+------------------+----------
- lost_bet_paid |      21356.36 |             0.00 | 21356.36
- wrong_amount  |       2648.65 |          2793.06 |  -144.41
+ lost_bet_paid |       8963.17 |             0.00 |  8963.17
+ wrong_amount  |       2034.50 |          1907.58 |   126.92
 (2 rows)
 

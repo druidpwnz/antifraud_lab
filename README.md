@@ -1,239 +1,261 @@
 # Antifraud Lab — Build Plan
 
 A self-contained fraud-detection lab running on the home server: a generator that
-continuously produces production-like betting and payment traffic (with deliberately
-planted fraud patterns), SQL detection rules that hunt for them, an API, and Grafana
-dashboards on top.
+produces production-like betting and payment traffic with deliberately planted fraud,
+a REST API over it, an admin panel, and Grafana dashboards.
 
-**Goal:** close the SQL / REST API / Python / CI-CD gaps in one project, and end up
-with a fraud story that can be shown and discussed without touching employer data.
+**Goal (revised):** depth in **REST API design**, **Python services**, and **CI/CD**.
+Advanced SQL is no longer the target — the rules layer stays deliberately thin.
 
 ---
 
-## Phase 0 — Repo and skeleton
+## Status
 
-- [ ] New private repo `antifraud-lab`
-- [ ] Layout:
+| Phase | What | State |
+|---|---|---|
+| 0 | Repo, skeleton, compose | **compose still empty** |
+| 1 | Schema — 14 tables + `sim_state` | **done** |
+| 2 | Backfill generator | **done** |
+| 3 | Fraud injector — more patterns | 1 of 3 done |
+| 4 | Live generator | next |
+| 5 | Thin alerting (fills `alerts`) | not started |
+| 6 | API — FastAPI | the main event |
+| 7 | Flask admin panel | optional |
+| 8 | Compose, for real | not started |
+| 9 | Grafana + Prometheus — fraud alerting | not started |
+| 10 | CI | not started |
+
+Done so far: 14-table schema with constraints that hold, a seeded reproducible
+backfill (90 days = 9.7k players, 650k bets, ~10 min), `SETTLEMENT_ERROR` injection
+with ground truth in `fraud_labels`, and `db/tests/backfill_checks.sql` — nine
+invariants that must read 0 at any dataset size.
+
+---
+
+## Decisions
+
+**1. One web framework or two? — SETTLED.** FastAPI for the API, Flask-Admin as a
+separate small service against the same database. Two services, as a real back
+office has: the public API and the internal admin panel are rarely the same app.
+
+**2. Does the admin panel share models with the API?** Flask-Admin wants SQLAlchemy
+models. The API can use raw SQL. Sharing one models package between two services
+means a shared library; not sharing means writing the tables twice. Either is fine;
+pick one knowingly.
+
+---
+
+## Phase 3 — Fraud injector: two more patterns
+
+`generator/FRAUD_PATTERNS.md` is the map: what each pattern plants, what it labels,
+what it depends on. `SETTLEMENT_ERROR` is done.
+
+Pick two of these three. All are buildable with the schema as it stands:
+
+- [ ] **`LATE_BET`** — a bet written after `events.start_time`. The generator
+      structurally prevents this, so the injector must bypass `load_open_selections`.
+      Cheapest to build, and trivially checkable: the baseline query returns 0 on
+      650k honest bets.
+- [ ] **`STAKE_ESCALATION`** — weeks of small bets, then one very large one. Account
+      takeover shaped. Needs no new tables, and competes with genuine high-roller
+      noise, which makes it the most realistic of the three.
+- [ ] **`MULTI_ACCOUNT`** — 3–6 accounts sharing a `device_id` or payment
+      fingerprint, registered days apart. Needs `cluster_id` so the ring scores as
+      one incident. Note the honest households already in the data (156 shared
+      devices at 90 days) are exactly what makes this hard.
+
+- [ ] Every planted row writes to `fraud_labels`
+- [ ] `SETTLEMENT_ERROR_RATE` and friends scale with `DAYS` — rate x settlements is
+      what decides whether there is anything to measure
+- [ ] Update `FRAUD_PATTERNS.md` as each lands
+
+**Skip:** `PASSTHROUGH` and `CARD_TESTING` need several payment methods per player;
+`MATCHED_BETTING` needs `MULTI_ACCOUNT` first; `BONUS_ABUSE` needs the `bonuses`
+table to be written to at all.
+
+---
+
+## Phase 4 — Live generator
+
+The same code path as backfill, running forward from where backfill stopped.
+
+- [ ] Read `sim_state.sim_time` on startup; `INSERT ... ON CONFLICT (id) DO UPDATE`
+      on every tick (the backfill/live split you already decided)
+- [ ] Time compression from `.env`:
 
 ```
-antifraud-lab/
-  docker-compose.yml
-  db/migrations/          # 001_schema.sql, 002_indexes.sql ...
-  generator/              # python service
-  rules/                  # SQL detection queries + runner
-  api/                    # fastapi
-  grafana/provisioning/   # datasources + dashboards as code
-  prometheus/
-  .github/workflows/
+TICK_SECONDS=1
+SIM_MINUTES_PER_TICK=5     # ~one simulated hour per 12 real seconds
 ```
 
-- [ ] Compose services: `postgres`, `generator`, `rules-runner`, `api`, `grafana`, `prometheus`
+- [ ] Rebuild in-memory state from the database at startup: players, balances,
+      open bets. Archetypes need no storage — `players.archetype_for(id)` derives
+      them from the seed
+- [ ] Graceful shutdown (SIGTERM), structured logging
+- [ ] Prometheus counters: rows written per second, sim lag behind wall clock
+
+**The thing to watch:** the handoff. Nothing should look different in the data on
+either side of `sim_state.sim_time`. Re-run `backfill_checks.sql` after the live
+generator has run for an hour — every invariant must still read 0.
+
+---
+
+## Phase 5 — Thin alerting
+
+Not the old phase 3. No window-function tuning, no threshold optimisation. This
+exists for one reason: **`alerts` must have rows in it, or the API has nothing to
+serve.**
+
+- [ ] One small `.sql` file per planted pattern, each returning candidate alerts
+      with a stable `rule_code` — the obvious query, not a clever one
+- [ ] `rules-runner`: a loop that executes them on a schedule and upserts into
+      `alerts`, deduped on `(player_id, rule_code, window_start, window_end)`
+- [ ] Rules must never read `fraud_labels`
+- [ ] One scoring query joining `alerts` to `fraud_labels` — precision and recall
+      per rule. Keep it: it is the one number that makes the alerts credible, and
+      it is a good thing to be able to show
+- [ ] Expose Prometheus metrics from the runner: alerts created per `rule_code`,
+      rows scanned, run duration, time since last successful run. These are what
+      phase 9 alerts on
+
+Budget: an evening, not a week. If a rule is hard, make it dumber.
+
+---
+
+## Phase 6 — API (the main event)
+
+FastAPI over the same database. This is where the time goes now.
+
+**Endpoints**
+
+- [ ] `GET /players/{id}/risk` — score plus contributing alerts
+- [ ] `GET /alerts` — filter by `rule_code`, `severity`, `since`; paginated
+- [ ] `POST /alerts/{id}/review` — mark confirmed or false positive
+- [ ] `POST /transactions` — score a transaction inline, return a decision
+
+**The parts that are actually the learning**
+
+- [ ] **Pagination** — limit/offset vs cursor, and why cursor survives inserts
+- [ ] **Status codes that mean something** — 400 vs 404 vs 409 vs 422, and when
+      Pydantic returns 422 for you
+- [ ] **Idempotency** on `POST /transactions` — an `Idempotency-Key` header, stored
+      so a retry returns the first answer instead of scoring twice
+- [ ] **API-key auth** via header, as a dependency rather than per-endpoint code
+- [ ] **Error shape** — one consistent JSON error body across every failure
+- [ ] **Pydantic request and response models** — where validation actually lives
+- [ ] **Connection pooling** — one pool for the app, not a connection per request
+- [ ] **OpenAPI** — read what FastAPI generates and fix what it gets wrong
+
+**Proof it works**
+
+- [ ] Postman collection committed: environment variables, auth header, tests
+      asserting status codes and response shape
+- [ ] `pytest` against a test database: happy path, 404, 422, bad key, idempotent
+      replay
+
+---
+
+## Phase 7 — Flask admin panel (optional)
+
+A back office over the same tables, built fast with third-party modules rather than
+by hand. The point is learning the ecosystem, not the UI.
+
+- [ ] `Flask-SQLAlchemy` models for the tables the admin touches
+- [ ] `Flask-Admin` model views: alerts, players, transactions
+- [ ] `Flask-Login` for a single admin user
+- [ ] Custom action: confirm / mark false positive, calling the **API** rather than
+      writing to the database directly — that keeps one path for writes and gives
+      the API a real consumer
+
+Cut this if time is short. It is the least transferable phase.
+
+---
+
+## Phase 8 — Compose, for real
+
+`docker-compose.yml` has been empty since day one, and by now there are four
+services that need to talk to each other.
+
+- [ ] `postgres`, `generator` (live mode), `rules-runner`, `api`, `admin`,
+      `grafana`, `prometheus`
 - [ ] One bridge network, Postgres on a named volume
-- [ ] Publish only Grafana and the API to the LAN — nothing else
+- [ ] Publish only the API, the admin panel and Grafana to the LAN
+- [ ] Healthcheck on Postgres, `depends_on: condition: service_healthy` — a plain
+      `depends_on` does not wait for the database to accept connections
+- [ ] Migrations applied by an entrypoint, not by hand
 - [ ] `.env` for credentials and simulation knobs, `.env.example` committed
 
 ---
 
-## Phase 1 — Schema
+## Phase 9 — Grafana + Prometheus: where fraud becomes an alert
 
-Model it like a real bookmaker back office, not a toy.
+Detected fraud surfaces here. Two alerting paths, and they are not interchangeable.
 
-### Core tables
+**Grafana alerting, on the Postgres datasource — per-entity alerts.**
+Grafana runs SQL on a schedule and fires on the rows it gets back, so it can name a
+player, a cluster or a settlement.
 
-| Table | Key columns |
-|---|---|
-| `players` | id, registered_at, country, currency, status |
-| `sessions` | player_id, started_at, ip, device_id, user_agent |
-| `payment_methods` | player_id, type (card/crypto/bank), fingerprint (hashed PAN or wallet), last4, added_at |
-| `transactions` | player_id, method_id, direction (deposit/withdrawal), amount, currency, status (pending/approved/rejected/chargeback), created_at, processed_at |
-| `events` | sport, league, start_time, status |
-| `markets` | event_id, type, status |
-| `selections` | market_id, name, current_odds |
-| `odds_history` | selection_id, odds, changed_at |
-| `bets` | player_id, placed_at, stake, total_odds, status |
-| `bet_selections` | bet_id, selection_id, odds_at_placement |
-| `settlements` | bet_id, result, payout, settled_at |
-| `bonuses` | player_id, type, granted_at, wagering_requirement, wagered_amount |
+- [ ] Fire on a new high-severity row in `alerts`
+- [ ] Fire on a settlement mismatch above a money threshold
+- [ ] Fire on a device or fingerprint gaining a third distinct player
+- [ ] Notification channel — whatever you actually read: Telegram, email, webhook
 
-### The two tables that make the project work
+**Prometheus alerting — aggregate shape, never per entity.**
+A Prometheus series is identified by its labels, so **`player_id`, `alert_id` and
+`device_id` must never be labels** — that is unbounded cardinality and it will take
+the instance down. Label by `rule_code` and `severity`, which are small fixed sets.
 
-| Table | Key columns |
-|---|---|
-| `alerts` | id, player_id, rule_code, severity, details `jsonb`, window_start, window_end, created_at, status (new/confirmed/false_positive) |
-| `fraud_labels` | entity_type, entity_id, pattern_code, injected_at |
+- [ ] Alert when the detection rate for a rule doubles or drops to zero
+- [ ] Alert when the rules-runner has not completed a run in N minutes
+- [ ] Alert when the live generator's sim clock falls behind wall clock
+- [ ] Alert on API error rate and p99 latency
 
-`fraud_labels` is the ground truth — the generator records everything it planted.
-**Detection rules must never read this table.** It exists only to score the rules
-afterwards: precision, recall and F1 per rule, threshold tuning backed by numbers.
+**Dashboards**
 
-### Tasks
-
-- [ ] Write `001_schema.sql`
-- [ ] Indexes: `(player_id, created_at)` on transactions, `(player_id, placed_at)` on bets,
-      `(fingerprint)` on payment_methods, `(device_id)` on sessions
-- [ ] Decide migration tooling — plain numbered `.sql` files applied by an entrypoint script
-      is enough; Alembic only if the API grows ORM models
+- [ ] *Fraud*: alerts per hour by rule, top risk players, flagged share of volume,
+      alerts by status (new / confirmed / false positive)
+- [ ] *Scoring*: planted vs detected vs missed per pattern, precision and recall as
+      stat panels — this is where `fraud_labels` is allowed to appear, because a
+      dashboard is not a detection rule
+- [ ] *Money*: deposits vs withdrawals, turnover, house margin over time
+- [ ] *Ops*: API latency and error rate, generator rows/sec, runner duration and lag
+- [ ] Datasources, dashboards **and alert rules** provisioned as JSON in the repo,
+      so nothing lives only inside Grafana's own database
 
 ---
 
-## Phase 2 — The generator (main build)
-
-Two modes sharing one code path.
-
-### Backfill
-
-```
-python -m generator backfill --days 90 --seed 42
-```
-
-90 days of history in a few minutes, written with explicit timestamps. Seeded RNG so the
-dataset is reproducible — essential when a rule suddenly behaves differently.
-
-### Live
-
-Long-running loop with a time-compression factor:
-
-```
-TICK_SECONDS=1
-SIM_MINUTES_PER_TICK=5     # ≈ one simulated hour per 12 real seconds
-```
-
-Set it to 1:1 to watch Grafana move in real time.
-
-### Realism, in build order
-
-1. **Daily and weekly shape** — traffic as a sine curve peaking in the evening, weekend
-   multiplier. Uniform-random timestamps are the fastest way to ruin a fake dataset.
-2. **Event schedule** — fixtures generated a few days ahead; bet volume spikes in the
-   30 minutes before kickoff and collapses after. Odds drift between placement and start.
-3. **Player archetypes** — casual (small stakes, weekends), regular, high-roller,
-   dormant-then-returning. Each with a lifetime and a churn probability. Stakes log-normal,
-   not uniform.
-4. **Normal noise that looks suspicious** — honest players sharing an IP (household, office
-   NAT), legitimate big wins. Without this the rules score 100% and teach nothing.
-
-### Fraud injector
-
-Separate module, per-pattern probabilities in config.
-
-| Pattern | What the generator does |
-|---|---|
-| Multi-accounting | 3–6 accounts sharing `device_id` or payment fingerprint, registered within days, similar betting |
-| Bonus abuse | deposit exactly the bonus minimum, wager the requirement on near-certain low-odds markets, withdraw |
-| Matched betting / arb | linked accounts back opposite selections on the same market within minutes |
-| Deposit–withdraw passthrough | large deposit, near-zero turnover, withdrawal within the hour, often to a different method |
-| Card testing | many small deposits from different fingerprints, one IP, high rejection rate |
-| Late betting | bet timestamp after event `start_time`, or against stale odds |
-| Stake escalation | weeks of small bets, then a sudden huge one — account takeover |
-| Settlement error | payout ≠ stake × odds, or a settled-void bet still paying out |
-
-Build the settlement-error pattern — it is the bridge between this project and real
-day-to-day work on bet settlement and payout accuracy.
-
-- [ ] Every injected pattern writes a row to `fraud_labels`
-
-### Tasks
-
-- [ ] Player and session generation
-- [ ] Event / market / odds generation with a moving schedule
-- [ ] Bet placement and settlement
-- [ ] Deposits and withdrawals with realistic approve/reject rates
-- [ ] Fraud injector, one pattern at a time
-- [ ] Graceful shutdown, structured logging, Prometheus counters (events generated per second)
-
----
-
-## Phase 3 — Detection in SQL
-
-One `.sql` file per rule, each returning candidate alerts with a stable `rule_code`.
-Written with window functions and CTEs on purpose — this is the interview payload.
-
-- [ ] **Deposit velocity** — deposits per player per rolling hour:
-      `COUNT(*) OVER (PARTITION BY player_id ORDER BY created_at RANGE BETWEEN INTERVAL '1 hour' PRECEDING AND CURRENT ROW)`
-- [ ] **Turnover ratio** — withdrawals ÷ stakes per player per day, flag below 0.1 with
-      deposits above a floor
-- [ ] **Linked accounts** — self-join `payment_methods` on fingerprint, and `sessions` on
-      device_id, having ≥ 2 distinct players
-- [ ] **Opposing bets** — self-join `bet_selections` on market where selections differ,
-      players are in the same link cluster, and `placed_at` within 10 minutes
-- [ ] **Stake anomaly** —
-      `stake / AVG(stake) OVER (PARTITION BY player_id ORDER BY placed_at ROWS BETWEEN 50 PRECEDING AND 1 PRECEDING)`
-- [ ] **Settlement mismatch** — `ABS(payout - stake * total_odds) > 0.01` on won bets
-- [ ] **Late bet** — `bets.placed_at > events.start_time`
-- [ ] **Bonus abuse** — wagering completed almost entirely on odds below a threshold
-
-### Rules runner
-
-- [ ] Small service executing the rules on a schedule
-- [ ] Upsert into `alerts`, deduped on (player, rule_code, window) so alerts don't spam
-- [ ] Expose run duration and rows-flagged as Prometheus metrics
-
-### Scoring
-
-- [ ] One query joining `alerts` to `fraud_labels` → precision, recall, F1 per rule
-- [ ] Tune thresholds against that number, record before/after in the README
-
----
-
-## Phase 4 — API
-
-FastAPI over the same database.
-
-- [ ] `GET /players/{id}/risk` — score plus contributing alerts
-- [ ] `GET /alerts?rule_code=&severity=&since=` — paginated, proper 400 / 404 / 422
-- [ ] `POST /alerts/{id}/review` — mark confirmed or false positive
-- [ ] `POST /transactions` — score a transaction inline, return a decision, honour an
-      idempotency key
-- [ ] API-key auth via header
-- [ ] Postman collection committed alongside: environment variables, auth header, tests
-      asserting status codes and response shape
-
----
-
-## Phase 5 — Grafana
-
-**Postgres datasource — business view**
-
-- [ ] Alerts per hour by rule
-- [ ] Top risk players table
-- [ ] Precision / recall per rule as stat panels
-- [ ] Deposits vs withdrawals over time
-- [ ] Flagged share of total volume
-
-**Prometheus datasource — ops view**
-
-- [ ] API latency and error rate
-- [ ] Generator events per second
-- [ ] Rule-runner duration and lag
-
-- [ ] Provision datasources and dashboards as JSON in the repo, so nothing lives only
-      inside Grafana's own database
-
----
-
-## Phase 6 — CI
+## Phase 10 — CI
 
 GitHub Actions on push:
 
-- [ ] `ruff` lint
+- [ ] `ruff`
 - [ ] `pytest` against a `postgres` service container
-- [ ] Apply migrations, seed a small dataset, run every rule, assert each one catches its
-      planted pattern
+- [ ] Apply migrations, run a short backfill (`DAYS=3`), run
+      `db/tests/backfill_checks.sql` and fail the build if any invariant is non-zero
+- [ ] API tests against the same container
 - [ ] Build and push images
 
-That test suite is the honest version of "I know CI/CD".
+The backfill check is the honest version of "I know CI/CD": a test suite that runs a
+real database, generates real data, and asserts something that can actually break.
 
 ---
 
-## Cut points
+## Housekeeping
 
-Phases 1–3 alone already make a strong SQL and antifraud portfolio piece. The API, Grafana
-and CI are additions, not prerequisites. If time runs out, stop after the SQL rules and the
-scoring query.
+- [ ] `CLAUDE.md` points at `PLAN.md`; the plan is this file. Rename one of them.
+- [ ] Twelve `>= '2025-01-01'` CHECK floors in `001_schema.sql` — decide whether
+      they earn their place, and whether a ceiling would catch more real bugs
+- [ ] One device and one payment method per player is unrealistically clean. Needed
+      before `PASSTHROUGH`, `CARD_TESTING` or a convincing `MULTI_ACCOUNT`
+- [ ] `bonuses` is an empty table
 
-## Open decision before writing code
+## What was dropped, and why
 
-Does the generator write straight to Postgres, or publish to a queue that a consumer
-persists? Straight to Postgres is simpler and is the recommended start. Swapping in Redis
-Streams or NATS later is a natural **phase 7** if streaming experience becomes worth
-claiming.
+The original phase 3 — eight detection rules built on window functions and CTEs,
+with threshold tuning driven by precision and recall — was the centrepiece when the
+target was a SQL interview. That target is gone, so it is now a liability: weeks of
+work that no longer serves the goal.
+
+What survives is phase 5: enough rules to populate `alerts`, plus the scoring query.
+The generator, the schema and `fraud_labels` were never SQL-interview props — they
+are what gives the API something real to serve.

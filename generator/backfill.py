@@ -8,6 +8,7 @@ import betting
 import config
 import db
 import events
+import fraud
 import payments
 import players
 import settlement
@@ -53,6 +54,8 @@ with db.connect() as conn:
         payments.create_deposits(conn, hour_end, active, balances)
         open_selections = betting.load_open_selections(conn, hour_end)
         betting.create_bets(conn, hour_end, active, balances, open_selections)
+        fraud.maybe_late_bets(conn, hour, hour_end, active, balances)
+        fraud.maybe_stake_escalation(conn, hour_end, active, balances, open_selections)
 
         payments.create_withdrawals(conn, hour_end, active, balances, pending_withdrawals)
 

@@ -81,6 +81,7 @@ FIXTURES_PER_DAY = 10
 WEEKEND_FIXTURE_MULTIPLIER = 1.6
 FIXTURE_DAYS_AHEAD = 2       # always at least this many days of upcoming matches
 
+MATCH_MINUTES = 110          # kickoff to final whistle
 MAX_GOALS = 10               # goal counts above this are ignored when pricing
 MARGIN = 1.06                # bookmaker margin: without it random betting would break even
 ODDS_MOVE_CHANCE = 0.10      # share of upcoming selections whose odds move in an hour
@@ -113,5 +114,18 @@ WITHDRAWAL_DELAY_HOURS = (1, 24)     # payouts are not instant
 
 INJECT_FRAUD = True
 
-SETTLEMENT_ERROR_RATE = 0.005      # ~1 in 2000 settlements
+# Rate x settlements is what decides whether there is anything to measure.
+# 0.005 (~1 in 200) suits DAYS=14; drop to 0.0005 for a 90-day dataset.
+SETTLEMENT_ERROR_RATE = 0.005
 SETTLEMENT_ERROR_OFFSET = (0.05, 0.40)   # how far off the payout is, as a share
+
+LATE_BET_RATE = 0.01                # chance per active player per hour
+
+# Account takeover shape: a long history of small bets, then one huge one.
+# Only ~6% of active player-hours are eligible (needs a betting history AND a balance
+# worth emptying), so this rate is much higher than the other patterns' to land a
+# comparable number of plants.
+STAKE_ESCALATION_RATE = 0.10        # chance per eligible active player per hour
+ESCALATION_MIN_BETS = 15            # needs a history first, or there is no anomaly
+ESCALATION_MIN_MULTIPLE = 8         # balance must be this many average stakes
+ESCALATION_MULTIPLE = (10, 40)      # how many average stakes the big bet is

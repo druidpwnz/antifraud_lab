@@ -4,7 +4,7 @@
 --     psql antifraud -f db/tests/backfill_checks.sql
 --
 -- The "expect" numbers below are for SEED=42, DAYS=14, END=2026-09-01,
--- INJECT_FRAUD=True, SETTLEMENT_ERROR_RATE=0.0005. Change any of those and the
+-- INJECT_FRAUD=True and the fraud rates as committed. Change any of those and the
 -- counts change. The checks that must read 0 hold at any size - those are the
 -- ones that actually matter.
 
@@ -23,7 +23,7 @@ JOIN players p ON p.id = t.player_id
 WHERE t.created_at < p.registered_at;
 
 
-\echo === 2. shared devices: honest households (expect 1467 devices, 26 shared) ===
+\echo === 2. shared devices: honest households (expect 1436 devices, 27 shared) ===
 
 SELECT count(*) AS devices_total,
        count(*) FILTER (WHERE players_on_device >= 2) AS devices_shared
@@ -55,7 +55,7 @@ ORDER BY players DESC, device_id
 LIMIT 10;
 
 
-\echo === 3. odds drift (expect 1316 selections, 10783 rows, max 19 changes) ===
+\echo === 3. odds drift (expect 1337 selections, 11087 rows, max 19 changes) ===
 
 SELECT count(DISTINCT selection_id) AS selections,
        count(*)                     AS odds_rows,
@@ -87,7 +87,7 @@ FROM price
 WHERE rn = 1;          -- one row per selection
 
 
-\echo === 4. deposit processing time (expect 4003 deposits, min 5s, avg 302.4s, max 600s) ===
+\echo === 4. deposit processing time (expect 4109 deposits, min 5s, avg 302.1s, max 600s) ===
 
 SELECT count(*)                                                      AS deposits,
        min(EXTRACT(EPOCH FROM processed_at - created_at))::int        AS min_seconds,
@@ -98,7 +98,7 @@ WHERE direction = 'deposit'
   AND processed_at IS NOT NULL;
 
 
-\echo === 5. bets (expect 15206 bets, avg stake 29.34, avg odds 8.40) ===
+\echo === 5. bets (expect 15234 bets, avg stake 29.98, avg odds 8.98) ===
 
 SELECT count(*)                  AS bets,
        round(avg(stake), 2)      AS avg_stake,
@@ -106,7 +106,7 @@ SELECT count(*)                  AS bets,
        sum(stake)                AS turnover
 FROM bets;
 
--- singles vs combos (expect 10672 / 1523 / 1570 / 1441)
+-- singles vs combos (expect 10633 / 1511 / 1594 / 1496)
 SELECT legs, count(*) AS bets
 FROM (
     SELECT bet_id, count(*) AS legs
@@ -116,15 +116,23 @@ FROM (
 GROUP BY legs
 ORDER BY legs;
 
--- LATE BETTING: no bet may be placed after its match kicked off. Must be 0.
--- This is the future LATE_BET rule, run against honest data.
-SELECT count(*) AS late_bets
-FROM bets b
-JOIN bet_selections bs ON bs.bet_id = b.id
-JOIN selections s      ON s.id = bs.selection_id
-JOIN markets m         ON m.id = s.market_id
-JOIN events e          ON e.id = m.event_id
-WHERE b.placed_at >= e.start_time;
+-- LATE BETTING: no bet may be placed after its match kicked off, unless the
+-- injector planted it. Anything late AND unlabelled is a generator bug. Must be 0.
+SELECT count(*) AS unlabelled_late_bets
+FROM (
+    SELECT DISTINCT b.id
+    FROM bets b
+    JOIN bet_selections bs ON bs.bet_id = b.id
+    JOIN selections s      ON s.id = bs.selection_id
+    JOIN markets m         ON m.id = s.market_id
+    JOIN events e          ON e.id = m.event_id
+    WHERE b.placed_at >= e.start_time
+) late
+WHERE NOT EXISTS (
+    SELECT 1 FROM fraud_labels f
+    WHERE f.entity_type = 'bet' AND f.pattern_code = 'LATE_BET'
+      AND f.entity_id = late.id
+);
 
 -- total_odds must equal the product of the legs' odds at placement. Must be 0.
 -- If this ever breaks, the settlement-mismatch rule starts flagging honest bets.
@@ -188,7 +196,7 @@ FROM (
 WHERE running < 0;
 
 
-\echo === 6. settlement (expect 158 of 188 events finished, 12783 settlements) ===
+\echo === 6. settlement (expect 161 of 191 events finished, 12666 settlements) ===
 
 SELECT count(*) FILTER (WHERE status = 'finished') AS finished,
        count(*) FILTER (WHERE status = 'scheduled') AS still_scheduled,
@@ -200,7 +208,7 @@ FROM bets b
 GROUP BY b.status
 ORDER BY b.status;
 
--- expect won 4335 / lost 8448
+-- expect won 4266 / lost 8400
 SELECT result, count(*) AS settlements, sum(payout) AS paid
 FROM settlements
 GROUP BY result
@@ -257,7 +265,7 @@ JOIN settlements s ON s.bet_id = b.id;
 -- if you want a number that settles down quickly.
 
 
-\echo === 7. withdrawals (expect 1115: 1005 approved, 110 still pending) ===
+\echo === 7. withdrawals (expect 1099: 982 approved, 117 still pending) ===
 
 SELECT direction, status, count(*), sum(amount)
 FROM transactions
@@ -285,17 +293,48 @@ WHERE direction = 'withdrawal' AND processed_at IS NOT NULL;
 
 \echo === 8. planted fraud (ground truth - rules/ must never read this table) ===
 
--- How many rows land here is RATE x SETTLEMENTS, so it moves with DAYS as well as
--- with SETTLEMENT_ERROR_RATE. At DAYS=14 and rate 0.0005 that came out as 4 planted,
--- only 1 of them on a won bet - far too few to compute precision or recall from.
--- Raise the rate while DAYS is small; lower it again for the 90-day dataset.
+-- Expect 55 SETTLEMENT_ERROR (31 lost_bet_paid + 24 wrong_amount), 28 LATE_BET,
+-- 23 STAKE_ESCALATION.
+--
+-- How many rows land here is RATE x OPPORTUNITIES, so it moves with DAYS too. The
+-- three rates are NOT comparable with each other: STAKE_ESCALATION is 0.10 because
+-- only ~6% of active player-hours are eligible for it, while SETTLEMENT_ERROR is
+-- 0.005 against every settlement. Drop all three for a 90-day dataset.
 
 SELECT pattern_code,
+       entity_type,
        details ->> 'variant' AS variant,
        count(*)              AS planted
 FROM fraud_labels
-GROUP BY pattern_code, variant
+GROUP BY pattern_code, entity_type, variant
 ORDER BY pattern_code, variant;
+
+-- STAKE_ESCALATION: how big were the planted bets compared with the player's own
+-- history, and how many of them are smaller than ordinary honest big bets?
+-- The second number is the argument for a per-player rule over a fixed threshold.
+SELECT count(*)                                                      AS planted,
+       round(avg((details ->> 'multiple_of_average')::numeric), 1)   AS avg_multiple,
+       min((details ->> 'stake')::numeric)                           AS smallest,
+       max((details ->> 'stake')::numeric)                           AS biggest,
+       (SELECT count(*) FROM bets b
+        WHERE b.stake > (SELECT min((details ->> 'stake')::numeric)
+                         FROM fraud_labels WHERE pattern_code = 'STAKE_ESCALATION')
+          AND NOT EXISTS (SELECT 1 FROM fraud_labels f2
+                          WHERE f2.entity_type = 'bet' AND f2.entity_id = b.id)
+       ) AS honest_bets_that_are_bigger
+FROM fraud_labels
+WHERE pattern_code = 'STAKE_ESCALATION';
+
+-- LATE_BET: how far after kickoff, and did they win more often than honest bets?
+-- A real late bettor knows something the book does not, so a win rate well above
+-- the honest one is a second signal a rule could use.
+SELECT count(*)                                                    AS planted,
+       round(avg((details ->> 'seconds_after_kickoff')::int) / 60.0) AS avg_minutes_late,
+       count(*) FILTER (WHERE st.result = 'won')                   AS won,
+       count(*) FILTER (WHERE st.bet_id IS NULL)                   AS not_settled_yet
+FROM fraud_labels f
+LEFT JOIN settlements st ON st.bet_id = f.entity_id
+WHERE f.pattern_code = 'LATE_BET' AND f.entity_type = 'bet';
 
 -- how much of the planted fraud the obvious rule can even see.
 -- The WHERE clause of a rule decides what it is blind to: this one only looks at

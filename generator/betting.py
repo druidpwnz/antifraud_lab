@@ -61,26 +61,37 @@ def create_bets(conn, hour_end, active_players, balances, open_selections):
             )
             stake = min(stake, balance)      # never bet more than you have
 
-            bet_id = conn.execute(
-                """
-                INSERT INTO bets (player_id, placed_at, stake, currency, total_odds)
-                VALUES (%s, %s, %s, %s, %s)
-                RETURNING id
-                """,
-                (player["id"], placed_at, stake, player["currency"], total_odds),
-            ).fetchone()[0]
+            place_bet(conn, player, placed_at, legs, stake, total_odds)
 
-            for selection_id, odds, _event_id in legs:
-                conn.execute(
-                    """
-                    INSERT INTO bet_selections (bet_id, selection_id, odds_at_placement)
-                    VALUES (%s, %s, %s)
-                    """,
-                    (bet_id, selection_id, odds),
-                )
+            # running history, so the fraud injector knows what "normal" looks like
+            # for this player. The planted bet is deliberately not counted here.
+            player["bets_placed"] = player.get("bets_placed", 0) + 1
+            player["stake_total"] = player.get("stake_total", Decimal("0.00")) + stake
 
             balance = balance - stake
             balances[player["id"]] = balance
+
+
+def place_bet(conn, player, placed_at, legs, stake, total_odds):
+    """Write one bet and its legs. Used by normal betting and by the fraud injector."""
+    bet_id = conn.execute(
+        """
+        INSERT INTO bets (player_id, placed_at, stake, currency, total_odds)
+        VALUES (%s, %s, %s, %s, %s)
+        RETURNING id
+        """,
+        (player["id"], placed_at, stake, player["currency"], total_odds),
+    ).fetchone()[0]
+
+    for selection_id, odds, *_rest in legs:
+        conn.execute(
+            """
+            INSERT INTO bet_selections (bet_id, selection_id, odds_at_placement)
+            VALUES (%s, %s, %s)
+            """,
+            (bet_id, selection_id, odds),
+        )
+    return bet_id
 
 
 def pick_legs(open_selections):
