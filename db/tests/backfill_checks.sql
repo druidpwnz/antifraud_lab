@@ -3,10 +3,11 @@
 -- Sanity checks on generated data. Run after ./reset.sh + backfill.py:
 --     psql antifraud -f db/tests/backfill_checks.sql
 --
--- Expected values are for SEED=42, DAYS=3, END=2026-09-01.
--- config.py currently says DAYS=90, so the counts below will NOT match that run.
--- The checks that must read 0 hold at any size - those are the ones that matter.
--- Change any of those and the numbers change - the shapes should not.
+-- The "expect" numbers below are for SEED=42, DAYS=14, END=2026-09-01,
+-- INJECT_FRAUD=True, SETTLEMENT_ERROR_RATE=0.0005. Change any of those and the
+-- counts change. The checks that must read 0 hold at any size - those are the
+-- ones that actually matter.
+
 
 \echo === 1. causality: nothing happens before the player exists (both must be 0) ===
 
@@ -22,7 +23,7 @@ JOIN players p ON p.id = t.player_id
 WHERE t.created_at < p.registered_at;
 
 
-\echo === 2. shared devices: honest households (expect 346 devices, 4 shared) ===
+\echo === 2. shared devices: honest households (expect 1467 devices, 26 shared) ===
 
 SELECT count(*) AS devices_total,
        count(*) FILTER (WHERE players_on_device >= 2) AS devices_shared
@@ -54,7 +55,7 @@ ORDER BY players DESC, device_id
 LIMIT 10;
 
 
-\echo === 3. odds drift (expect 497 selections, 2547 rows, max 14 changes) ===
+\echo === 3. odds drift (expect 1316 selections, 10783 rows, max 19 changes) ===
 
 SELECT count(DISTINCT selection_id) AS selections,
        count(*)                     AS odds_rows,
@@ -86,7 +87,7 @@ FROM price
 WHERE rn = 1;          -- one row per selection
 
 
-\echo === 4. deposit processing time (expect 474 deposits, min 5s, avg 298.0s, max 599s) ===
+\echo === 4. deposit processing time (expect 4003 deposits, min 5s, avg 302.4s, max 600s) ===
 
 SELECT count(*)                                                      AS deposits,
        min(EXTRACT(EPOCH FROM processed_at - created_at))::int        AS min_seconds,
@@ -97,7 +98,7 @@ WHERE direction = 'deposit'
   AND processed_at IS NOT NULL;
 
 
-\echo === 5. bets (expect 982 bets, avg stake 20.86, avg odds 9.58) ===
+\echo === 5. bets (expect 15206 bets, avg stake 29.34, avg odds 8.40) ===
 
 SELECT count(*)                  AS bets,
        round(avg(stake), 2)      AS avg_stake,
@@ -105,7 +106,7 @@ SELECT count(*)                  AS bets,
        sum(stake)                AS turnover
 FROM bets;
 
--- singles vs combos (expect 662 / 110 / 100 / 110)
+-- singles vs combos (expect 10672 / 1523 / 1570 / 1441)
 SELECT legs, count(*) AS bets
 FROM (
     SELECT bet_id, count(*) AS legs
@@ -187,7 +188,7 @@ FROM (
 WHERE running < 0;
 
 
-\echo === 6. settlement (expect 41 of 71 events finished, 521 settlements) ===
+\echo === 6. settlement (expect 158 of 188 events finished, 12783 settlements) ===
 
 SELECT count(*) FILTER (WHERE status = 'finished') AS finished,
        count(*) FILTER (WHERE status = 'scheduled') AS still_scheduled,
@@ -199,7 +200,7 @@ FROM bets b
 GROUP BY b.status
 ORDER BY b.status;
 
--- expect won 182 / lost 339
+-- expect won 4335 / lost 8448
 SELECT result, count(*) AS settlements, sum(payout) AS paid
 FROM settlements
 GROUP BY result
@@ -256,7 +257,7 @@ JOIN settlements s ON s.bet_id = b.id;
 -- if you want a number that settles down quickly.
 
 
-\echo === 7. withdrawals (expect 56: 38 approved, 18 still pending) ===
+\echo === 7. withdrawals (expect 1115: 1005 approved, 110 still pending) ===
 
 SELECT direction, status, count(*), sum(amount)
 FROM transactions
@@ -283,6 +284,11 @@ WHERE direction = 'withdrawal' AND processed_at IS NOT NULL;
 
 
 \echo === 8. planted fraud (ground truth - rules/ must never read this table) ===
+
+-- How many rows land here is RATE x SETTLEMENTS, so it moves with DAYS as well as
+-- with SETTLEMENT_ERROR_RATE. At DAYS=14 and rate 0.0005 that came out as 4 planted,
+-- only 1 of them on a won bet - far too few to compute precision or recall from.
+-- Raise the rate while DAYS is small; lower it again for the 90-day dataset.
 
 SELECT pattern_code,
        details ->> 'variant' AS variant,

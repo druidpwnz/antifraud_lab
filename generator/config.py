@@ -8,7 +8,7 @@ SEED = 42
 # The simulation ends at a FIXED moment, never datetime.now().
 # Same SEED + same END = exactly the same data on every run (CI depends on this).
 END = datetime(2026, 9, 1, tzinfo=timezone.utc)   # must be midnight UTC
-DAYS = 90                 
+DAYS = 14                 
 
 NEW_PLAYERS_PER_HOUR = 5
 COUNTRIES = ["UA", "PL", "DE", "GB", "ES"]
@@ -113,5 +113,5 @@ WITHDRAWAL_DELAY_HOURS = (1, 24)     # payouts are not instant
 
 INJECT_FRAUD = True
 
-SETTLEMENT_ERROR_RATE = 0.0005      # ~1 in 2000 settlements
+SETTLEMENT_ERROR_RATE = 0.005      # ~1 in 2000 settlements
 SETTLEMENT_ERROR_OFFSET = (0.05, 0.40)   # how far off the payout is, as a share
