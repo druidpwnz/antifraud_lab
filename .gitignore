@@ -1,0 +1,46 @@
+# --- Python ---
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# --- Tests and linters ---
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# --- Secrets and local config ---
+# .env holds real passwords; .env.example (committed) shows which variables exist
+.env
+.env.*
+!.env.example
+
+# --- Local data: Postgres / Grafana / Prometheus volumes if bind-mounted ---
+data/
+pgdata/
+grafana/data/
+prometheus/data/
+
+# --- Database dumps (NOT *.sql - migrations and rules are .sql and must be committed) ---
+*.dump
+*.backup
+dumps/
+
+# --- Postman: local environments may contain API keys; the collection is committed ---
+*.postman_environment.local.json
+
+# --- Logs ---
+*.log
+logs/
+
+# --- Editors and OS ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
