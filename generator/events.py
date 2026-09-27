@@ -1,8 +1,11 @@
 # fixtures, markets, selections, odds
 #
 # Fixtures are created a few days ahead, so there are always matches to bet on.
-# The true probabilities stay in memory (event_probs) - settlement uses them later
-# to pick realistic scores. They are never written to the database.
+#
+# The true probabilities are never stored. They are DERIVED from the seed and the
+# event id, so settlement can recompute them for any event - including a match
+# created by the backfill and settled hours later by the live generator, in a
+# different process. Same rule as players.archetype_for().
 
 import random
 from decimal import Decimal
@@ -11,13 +14,14 @@ import config
 import helpers
 
 
-def create_fixtures_for_day(conn, created_at, day, event_probs):
-    """Create the matches played on `day`, with their markets, selections and first odds."""
+def create_fixtures_for_day(conn, created_at, day):
+    """Create the matches played on `day`. Returns how many were created."""
     count = config.FIXTURES_PER_DAY
     if day.weekday() >= 5:
         count = int(count * config.WEEKEND_FIXTURE_MULTIPLIER)
 
     busy_teams = set()          # a team plays at most one match per day
+    created = 0
 
     for _ in range(count):
         league = random.choice(list(config.LEAGUES))
@@ -40,13 +44,13 @@ def create_fixtures_for_day(conn, created_at, day, event_probs):
             (config.SPORT, league, home, away, start_time),
         ).fetchone()[0]
 
-        probabilities = draw_probabilities()
-        event_probs[event_id] = probabilities
+        create_markets(conn, event_id, home, away, probabilities_for(event_id), created_at)
+        created += 1
 
-        create_markets(conn, event_id, home, away, probabilities, created_at)
+    return created
 
 
-def draw_probabilities():
+def probabilities_for(event_id):
     """Expected goals for each team, and the outcome chances that follow from them.
 
     Every market is priced from ONE model: goals are Poisson-distributed with these
@@ -54,9 +58,13 @@ def draw_probabilities():
     prices and the results agree and the bookmaker keeps its margin. Pricing each
     market from an unrelated random number would hand players a winning edge on
     over/under and both-teams-to-score.
+
+    Derived from (seed, event_id) rather than drawn from the global random stream,
+    so any process can recompute it for any event at any time.
     """
-    home_goals_avg = random.uniform(0.9, 2.3)     # home advantage: a bit higher
-    away_goals_avg = random.uniform(0.6, 1.9)
+    rng = random.Random(f"{config.SEED}:event:{event_id}")
+    home_goals_avg = rng.uniform(0.9, 2.3)        # home advantage: a bit higher
+    away_goals_avg = rng.uniform(0.6, 1.9)
 
     home_pmf = [helpers.poisson_pmf(home_goals_avg, k) for k in range(config.MAX_GOALS + 1)]
     away_pmf = [helpers.poisson_pmf(away_goals_avg, k) for k in range(config.MAX_GOALS + 1)]

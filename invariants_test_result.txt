@@ -1,0 +1,64 @@
+SET
+BEGIN
+CREATE FUNCTION
+ must_be_zero 
+--------------
+ 
+(1 row)
+
+ must_be_zero 
+--------------
+ 
+(1 row)
+
+ must_be_zero 
+--------------
+ 
+(1 row)
+
+ must_be_zero 
+--------------
+ 
+(1 row)
+
+ must_be_zero 
+--------------
+ 
+(1 row)
+
+ must_be_zero 
+--------------
+ 
+(1 row)
+
+ must_be_zero 
+--------------
+ 
+(1 row)
+
+ must_be_zero 
+--------------
+ 
+(1 row)
+
+ must_be_zero 
+--------------
+ 
+(1 row)
+
+ must_be_zero 
+--------------
+ 
+(1 row)
+
+ must_be_zero 
+--------------
+ 
+(1 row)
+
+ must_be_zero 
+--------------
+ 
+(1 row)
+
+ROLLBACK

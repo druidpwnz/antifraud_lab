@@ -129,3 +129,10 @@ STAKE_ESCALATION_RATE = 0.10        # chance per eligible active player per hour
 ESCALATION_MIN_BETS = 15            # needs a history first, or there is no anomaly
 ESCALATION_MIN_MULTIPLE = 8         # balance must be this many average stakes
 ESCALATION_MULTIPLE = (10, 40)      # how many average stakes the big bet is
+
+# --- Live generator ------------------------------------------------------
+# Read from the environment so a container can change them without a rebuild;
+# these are the defaults when the variable is not set.
+
+REAL_SECONDS_PER_SIM_HOUR = 12      # 3600 = real time, 12 = one sim day per 5 minutes
+CATCH_UP = True                     # run flat out until the sim clock reaches now

@@ -16,9 +16,9 @@ Advanced SQL is no longer the target — the rules layer stays deliberately thin
 | 0 | Repo, skeleton, compose | **compose still empty** |
 | 1 | Schema — 14 tables + `sim_state` | **done** |
 | 2 | Backfill generator | **done** |
-| 3 | Fraud injector — more patterns | 1 of 3 done |
-| 4 | Live generator | next |
-| 5 | Thin alerting (fills `alerts`) | not started |
+| 3 | Fraud injector | **3 patterns done** |
+| 4 | Live generator | **done** (no metrics yet) |
+| 5 | Thin alerting (fills `alerts`) | next |
 | 6 | API — FastAPI | the main event |
 | 7 | Flask admin panel | optional |
 | 8 | Compose, for real | not started |
@@ -27,8 +27,8 @@ Advanced SQL is no longer the target — the rules layer stays deliberately thin
 
 Done so far: 14-table schema with constraints that hold, a seeded reproducible
 backfill (90 days = 9.7k players, 650k bets, ~10 min), `SETTLEMENT_ERROR` injection
-with ground truth in `fraud_labels`, and `db/tests/backfill_checks.sql` — nine
-invariants that must read 0 at any dataset size.
+with ground truth in `fraud_labels`, and `db/tests/invariants.sql` — twelve checks
+that must hold at any dataset size, which raise and exit non-zero when they do not.
 
 ---
 
@@ -79,24 +79,34 @@ table to be written to at all.
 
 The same code path as backfill, running forward from where backfill stopped.
 
-- [ ] Read `sim_state.sim_time` on startup; `INSERT ... ON CONFLICT (id) DO UPDATE`
+- [x] Read `sim_state.sim_time` on startup; `INSERT ... ON CONFLICT (id) DO UPDATE`
       on every tick (the backfill/live split you already decided)
-- [ ] Time compression from `.env`:
+- [x] Time compression from the environment, with `config.py` defaults:
 
 ```
-TICK_SECONDS=1
-SIM_MINUTES_PER_TICK=5     # ~one simulated hour per 12 real seconds
+REAL_SECONDS_PER_SIM_HOUR=12   # 3600 = real time, 12 = one sim day per 5 minutes
+CATCH_UP=1                     # run flat out until the sim clock reaches now
 ```
 
-- [ ] Rebuild in-memory state from the database at startup: players, balances,
-      open bets. Archetypes need no storage — `players.archetype_for(id)` derives
-      them from the seed
-- [ ] Graceful shutdown (SIGTERM), structured logging
+      Steps in whole simulated hours rather than the 5-minute ticks originally
+      planned — that way live and backfill share `tick.one_hour()` exactly, instead of
+      two loops that could drift apart.
+
+- [x] Rebuild in-memory state from the database at startup — `state.load()`. Verified
+      against the backfill's own in-memory state: 1526 players, zero mismatches on
+      every field, balances exact to the cent
+- [x] **The rule that made this possible:** anything the live generator needs is
+      either in a table or derivable from (seed, row id). Archetypes, event goal
+      probabilities and withdrawal due times are all derived; nothing lives only in
+      a Python variable
+- [x] Graceful shutdown (SIGTERM/SIGINT): finishes the hour, commits, exits
+- [ ] Structured logging (plain prints for now)
 - [ ] Prometheus counters: rows written per second, sim lag behind wall clock
 
 **The thing to watch:** the handoff. Nothing should look different in the data on
-either side of `sim_state.sim_time`. Re-run `backfill_checks.sql` after the live
-generator has run for an hour — every invariant must still read 0.
+either side of `sim_state.sim_time`. Run `db/tests/invariants.sql` after the live
+generator has been going for a while — every check must still pass. (Done: it does,
+across 134k bets written by two processes.)
 
 ---
 
@@ -230,8 +240,9 @@ GitHub Actions on push:
 
 - [ ] `ruff`
 - [ ] `pytest` against a `postgres` service container
-- [ ] Apply migrations, run a short backfill (`DAYS=3`), run
-      `db/tests/backfill_checks.sql` and fail the build if any invariant is non-zero
+- [ ] Apply migrations, run a short backfill (`DAYS=3`), then
+      `psql -v ON_ERROR_STOP=1 -f db/tests/invariants.sql` — it already raises on
+      failure, so it needs no wrapper script
 - [ ] API tests against the same container
 - [ ] Build and push images
 

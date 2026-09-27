@@ -38,7 +38,12 @@ def create_deposits(conn, hour_end, active_players, balances):
 
         # The provider answers seconds to minutes later. The player waits for that answer,
         # so their clock moves to processed_at - they cannot bet with money not yet credited.
-        processed_at = min(created_at + timedelta(seconds=random.randint(5, 600)), config.END)
+        #
+        # Clamped to the end of THIS hour, not to config.END. Clamping to END was a bug
+        # that only appeared in live mode: past END it pulled processed_at back before
+        # created_at (which the schema forbids) and dragged the player's clock backwards,
+        # so their later rows were timestamped in the past.
+        processed_at = min(created_at + timedelta(seconds=random.randint(5, 600)), hour_end)
         player["clock"] = processed_at
 
         conn.execute(
@@ -56,12 +61,13 @@ def create_deposits(conn, hour_end, active_players, balances):
             balances[player["id"]] = balance + amount
 
 
-def create_withdrawals(conn, hour_end, active_players, balances, pending_withdrawals):
+def create_withdrawals(conn, hour_end, active_players, balances):
     """Players sitting on a decent balance cash out.
 
     A withdrawal is created as 'pending' with no processed_at - that is what the
     CHECK in the schema demands - and the money leaves the balance immediately,
-    the way a real operator reserves it. It is approved hours later.
+    the way a real operator reserves it. It is approved hours later, by
+    process_withdrawals(), which works out when from the row itself.
     """
     for player in active_players:
         balance = balances.get(player["id"], Decimal("0.00"))
@@ -92,24 +98,39 @@ def create_withdrawals(conn, hour_end, active_players, balances, pending_withdra
 
         balances[player["id"]] = balance - amount
 
-        due_at = created_at + timedelta(hours=random.randint(*config.WITHDRAWAL_DELAY_HOURS))
-        pending_withdrawals.append((due_at, transaction_id))
+
+def due_at(transaction_id, created_at):
+    """When this pending withdrawal gets approved.
+
+    Derived from (seed, transaction id) instead of being kept in a Python list, so
+    the live generator can pick up withdrawals the backfill left pending - in a
+    different process, with no shared memory. Same rule as archetypes and event
+    probabilities.
+    """
+    rng = random.Random(f"{config.SEED}:withdrawal:{transaction_id}")
+    return created_at + timedelta(hours=rng.randint(*config.WITHDRAWAL_DELAY_HOURS))
 
 
-def process_withdrawals(conn, hour, pending_withdrawals):
-    """Approve the withdrawals whose turn has come. Anything still waiting when the
-    backfill ends simply stays pending - which is what a real database looks like."""
-    still_waiting = []
-    for due_at, transaction_id in pending_withdrawals:
-        if due_at <= hour:
+def process_withdrawals(conn, hour):
+    """Approve the withdrawals whose turn has come. Anything still waiting when a run
+    ends simply stays pending - which is what a real database looks like."""
+    waiting = conn.execute(
+        """
+        SELECT id, created_at
+        FROM transactions
+        WHERE direction = 'withdrawal' AND status = 'pending'
+        ORDER BY id
+        """
+    ).fetchall()
+
+    for transaction_id, created_at in waiting:
+        approved_at = due_at(transaction_id, created_at)
+        if approved_at <= hour:
             conn.execute(
                 """
                 UPDATE transactions
                 SET status = 'approved', processed_at = %s
                 WHERE id = %s
                 """,
-                (due_at, transaction_id),
+                (approved_at, transaction_id),
             )
-        else:
-            still_waiting.append((due_at, transaction_id))
-    pending_withdrawals[:] = still_waiting

@@ -9,11 +9,12 @@ from datetime import timedelta
 from decimal import Decimal
 
 import config
+import events
 import fraud
 import helpers
 
 
-def finish_events(conn, hour, event_probs):
+def finish_events(conn, hour):
     """Play out every match that is over by now and decide all of its selections."""
     finished = conn.execute(
         """
@@ -27,7 +28,7 @@ def finish_events(conn, hour, event_probs):
     ).fetchall()
 
     for event_id, start_time in finished:
-        probabilities = event_probs[event_id]
+        probabilities = events.probabilities_for(event_id)
         home_goals = min(helpers.poisson(probabilities["home_goals_avg"]), config.MAX_GOALS)
         away_goals = min(helpers.poisson(probabilities["away_goals_avg"]), config.MAX_GOALS)
 
