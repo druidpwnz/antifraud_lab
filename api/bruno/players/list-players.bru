@@ -1,0 +1,44 @@
+meta {
+  name: List players - first page
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/v1/players?limit=5
+  body: none
+  auth: none
+}
+
+params:query {
+  limit: 5
+}
+
+assert {
+  res.status: eq 200
+  res.body.items: isArray
+}
+
+script:post-response {
+  // Saved for the next request, which asks for page 2 with it.
+  bru.setVar("nextCursor", res.body.next_cursor);
+  bru.setVar("lastIdOnPage1", res.body.items[res.body.items.length - 1].id);
+}
+
+tests {
+  test("a page of 5, with a cursor for the next one", function () {
+    expect(res.body.items).to.have.lengthOf(5);
+    expect(res.body.next_cursor).to.be.a("string");
+  });
+
+  test("ids are in ascending order", function () {
+    const ids = res.body.items.map((p) => p.id);
+    expect(ids).to.eql([...ids].sort((a, b) => a - b));
+  });
+
+  test("each player has the documented shape", function () {
+    const player = res.body.items[0];
+    expect(player).to.have.all.keys("id", "registered_at", "country", "currency", "status");
+    expect(player.registered_at).to.match(/Z$/);
+  });
+}

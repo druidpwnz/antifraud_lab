@@ -18,8 +18,8 @@ Advanced SQL is no longer the target — the rules layer stays deliberately thin
 | 2 | Backfill generator | **done** |
 | 3 | Fraud injector | **3 patterns done** |
 | 4 | Live generator | **done** (no metrics yet) |
-| 5 | Thin alerting (fills `alerts`) | next |
-| 6 | API — FastAPI | the main event |
+| 5 | Thin alerting (fills `alerts`) | **postponed** — after the API |
+| 6 | API — FastAPI | **next** |
 | 7 | Flask admin panel | optional |
 | 8 | Compose, for real | not started |
 | 9 | Grafana + Prometheus — fraud alerting | not started |
@@ -38,10 +38,12 @@ that must hold at any dataset size, which raise and exit non-zero when they do n
 separate small service against the same database. Two services, as a real back
 office has: the public API and the internal admin panel are rarely the same app.
 
-**2. Does the admin panel share models with the API?** Flask-Admin wants SQLAlchemy
-models. The API can use raw SQL. Sharing one models package between two services
-means a shared library; not sharing means writing the tables twice. Either is fine;
-pick one knowingly.
+**2. Does the admin panel share models with the API? — SETTLED: no.** The API uses
+psycopg 3 and raw SQL with a connection pool. Flask-Admin will get its own small
+SQLAlchemy models when phase 7 starts.
+
+**3. Alerts before or after the API? — SETTLED: after.** The API ships without alert
+endpoints; phase 5 and the alert endpoints come back in a later update.
 
 ---
 
@@ -110,7 +112,7 @@ across 134k bets written by two processes.)
 
 ---
 
-## Phase 5 — Thin alerting
+## Phase 5 — Thin alerting (postponed until after the API)
 
 Not the old phase 3. No window-function tuning, no threshold optimisation. This
 exists for one reason: **`alerts` must have rows in it, or the API has nothing to
@@ -132,36 +134,72 @@ Budget: an evening, not a week. If a rule is hard, make it dumber.
 
 ---
 
-## Phase 6 — API (the main event)
+## Phase 6 — API (next)
 
-FastAPI over the same database. This is where the time goes now.
+FastAPI over the same database, in `api/`. psycopg 3 with raw SQL and a connection
+pool, no ORM. No alert endpoints yet — those come back with phase 5.
 
-**Endpoints**
+### The write endpoint is a risk check, not a transaction
 
-- [ ] `GET /players/{id}/risk` — score plus contributing alerts
-- [ ] `GET /alerts` — filter by `rule_code`, `severity`, `since`; paginated
-- [ ] `POST /alerts/{id}/review` — mark confirmed or false positive
-- [ ] `POST /transactions` — score a transaction inline, return a decision
+`POST /transactions` would fight the live generator: its balances live in memory, so
+a withdrawal created by the API would be debited in the ledger but not by the
+generator, which would then overspend.
 
-**The parts that are actually the learning**
+So the API writes **risk checks** instead: "should this deposit or withdrawal go
+through?" It scores the proposed transaction against the player's real history,
+returns `approve` / `review` / `decline` with reasons, and stores the decision in its
+own table (`db/migrations/003_risk_checks.sql`). That is how a payment gateway calls
+an antifraud service, and it never touches the generator's tables.
 
-- [ ] **Pagination** — limit/offset vs cursor, and why cursor survives inserts
-- [ ] **Status codes that mean something** — 400 vs 404 vs 409 vs 422, and when
-      Pydantic returns 422 for you
-- [ ] **Idempotency** on `POST /transactions` — an `Idempotency-Key` header, stored
-      so a retry returns the first answer instead of scoring twice
-- [ ] **API-key auth** via header, as a dependency rather than per-endpoint code
-- [ ] **Error shape** — one consistent JSON error body across every failure
-- [ ] **Pydantic request and response models** — where validation actually lives
-- [ ] **Connection pooling** — one pool for the app, not a connection per request
-- [ ] **OpenAPI** — read what FastAPI generates and fix what it gets wrong
+**"Now" is the simulated clock.** Velocity windows are measured against
+`sim_state.sim_time`, not `now()`. `risk_checks.created_at` records the real call
+time. The two clocks again.
 
-**Proof it works**
+### Design decisions
 
-- [ ] Postman collection committed: environment variables, auth header, tests
-      asserting status codes and response shape
-- [ ] `pytest` against a test database: happy path, 404, 422, bad key, idempotent
-      replay
+| Topic | Decision | Why |
+|---|---|---|
+| Versioning | `/v1` URL prefix | Explicit, visible in logs and in Bruno |
+| Endpoints | sync `def` + `psycopg_pool.ConnectionPool` | FastAPI runs them in a threadpool; async is a later refactor |
+| Pagination | Cursor (keyset on `id`), opaque base64, `limit` 1–100 | The live generator inserts constantly — offset pagination would skip or repeat rows |
+| Errors | RFC 9457 `application/problem+json` for every failure | One shape for 400/401/404/422/500; a 500 never leaks a stack trace |
+| Auth | `X-API-Key`, keys from env `API_KEYS`, `hmac.compare_digest`, router dependency | Timing-safe; shows up as Authorize in `/docs` |
+| Money in JSON | Strings (`"12.50"`) from `Decimal` | Floats corrupt money |
+| Time in JSON | RFC 3339 UTC | The pool connects with `timezone=UTC` |
+| Idempotency | `Idempotency-Key` on POST, stored with a SHA-256 of the body. 201 first time; 200 + `Idempotent-Replayed: true` on replay; 422 if the same key comes with a different body | Race-safe via `UNIQUE` + `INSERT … ON CONFLICT DO NOTHING` |
+| Not exposed | `fraud_labels` | Ground truth never leaves the database |
+
+### Endpoints
+
+- [ ] `GET /health` (no DB) and `GET /ready` (`SELECT 1`, 503 if the DB is down)
+- [ ] `GET /v1/players`, `GET /v1/players/{id}`
+- [ ] `GET /v1/players/{id}/balance`, `/transactions`, `/bets`
+- [ ] `GET /v1/bets/{id}` — nested legs and settlement
+- [ ] `GET /v1/events`, `GET /v1/events/{id}` — nested markets and selections
+- [ ] `POST /v1/risk-checks`, `GET /v1/risk-checks/{id}`
+
+### Build order — one step at a time, reviewed before the next
+
+1. Skeleton: settings, pool, `/health`, `/ready`
+2. Problem+json errors and API-key auth
+3. Players with cursor pagination
+4. Player balance, transactions, bets
+5. Bets and events with nested response models
+6. Migration 003 and risk checks with idempotency
+7. ~~Postman collection~~ — replaced by a **Bruno** collection in `api/bruno/`,
+   built alongside each step rather than at the end
+8. Update README, STATUS, CLAUDE.md
+
+Tests are written with each step, against a separate `antifraud_test` database.
+
+**Bruno instead of Postman.** A Bruno collection is a folder of plain-text `.bru`
+files, so it lives in git and diffs like code, where Postman is one large exported
+JSON. It runs from the command line too (`bru run`), which is what phase 10 CI will
+use.
+
+**Proof it works:** `/docs` shows every endpoint with its schemas and errors; `pytest`
+passes; `bru run` over `api/bruno/` passes; and `db/tests/invariants.sql` still passes
+after risk checks have run, which shows the API never disturbed generator data.
 
 ---
 

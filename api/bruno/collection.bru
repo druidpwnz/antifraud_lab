@@ -1,0 +1,11 @@
+docs {
+  Requests and tests for the Antifraud Lab API.
+
+  The API key is sent on every request from here, once, instead of per request -
+  the same idea as the auth dependency on the /v1 router. Requests that test a bad
+  key override the header themselves.
+}
+
+headers {
+  X-API-Key: {{apiKey}}
+}

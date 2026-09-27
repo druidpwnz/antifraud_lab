@@ -3,11 +3,12 @@
 -- Things that must be true of the generated data at ANY size, with or without the
 -- live generator running. Every check must return 0 rows.
 --
---     psql antifraud -v ON_ERROR_STOP=1 -f db/tests/invariants.sql
+--     psql antifraud -v ON_ERROR_STOP=1 -qtA -f db/tests/invariants.sql
 --
--- On success it prints a PASS line per check and exits 0. On the first failure it
+-- On success it prints one PASS line per check and exits 0. On the first failure it
 -- raises, which with ON_ERROR_STOP=1 makes psql exit non-zero - so this file works
--- unchanged as a CI step.
+-- unchanged as a CI step. The -qtA flags drop the table borders and row counts, so
+-- the output is one clean line per check.
 --
 -- These queries may join to fraud_labels. That is the one legitimate use of it: to
 -- separate "planted on purpose" from "broken by accident". Nothing in rules/ ever may.
@@ -16,17 +17,18 @@ SET TIME ZONE 'UTC';
 
 BEGIN;
 
-CREATE FUNCTION pg_temp.must_be_zero(label text, query text) RETURNS void
+-- Returns the PASS line as a value rather than a NOTICE, so the labels land on
+-- stdout with the results instead of on stderr. A failure still raises.
+CREATE FUNCTION pg_temp.must_be_zero(label text, query text) RETURNS text
 LANGUAGE plpgsql AS $$
 DECLARE
     found bigint;
 BEGIN
     EXECUTE query INTO found;
-    IF found = 0 THEN
-        RAISE NOTICE 'PASS  %', label;
-    ELSE
+    IF found <> 0 THEN
         RAISE EXCEPTION 'FAIL  %: % row(s)', label, found;
     END IF;
+    RETURN 'PASS  ' || label;
 END $$;
 
 
