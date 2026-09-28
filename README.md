@@ -159,7 +159,7 @@ time. The two clocks again.
 
 | Topic | Decision | Why |
 |---|---|---|
-| Versioning | `/v1` URL prefix | Explicit, visible in logs and in Bruno |
+| Versioning | `/v1` URL prefix | Explicit, visible in logs and in Postman |
 | Endpoints | sync `def` + `psycopg_pool.ConnectionPool` | FastAPI runs them in a threadpool; async is a later refactor |
 | Pagination | Cursor (keyset on `id`), opaque base64, `limit` 1–100 | The live generator inserts constantly — offset pagination would skip or repeat rows |
 | Errors | RFC 9457 `application/problem+json` for every failure | One shape for 400/401/404/422/500; a 500 never leaks a stack trace |
@@ -186,19 +186,18 @@ time. The two clocks again.
 4. Player balance, transactions, bets
 5. Bets and events with nested response models
 6. Migration 003 and risk checks with idempotency
-7. ~~Postman collection~~ — replaced by a **Bruno** collection in `api/bruno/`,
-   built alongside each step rather than at the end
+7. Postman collection in `api/postman/` — built alongside each step rather than at the end
 8. Update README, STATUS, CLAUDE.md
 
 Tests are written with each step, against a separate `antifraud_test` database.
 
-**Bruno instead of Postman.** A Bruno collection is a folder of plain-text `.bru`
-files, so it lives in git and diffs like code, where Postman is one large exported
-JSON. It runs from the command line too (`bru run`), which is what phase 10 CI will
-use.
+**Postman collection:** `api/postman/`, with a `local` environment whose `apiKey`
+is empty in git and filled in inside Postman. Edits made in the app have to be
+exported back over the JSON to reach git. The same collection runs from the command
+line with Newman, which is what phase 10 CI will use.
 
 **Proof it works:** `/docs` shows every endpoint with its schemas and errors; `pytest`
-passes; `bru run` over `api/bruno/` passes; and `db/tests/invariants.sql` still passes
+passes; the Postman collection passes under Newman; and `db/tests/invariants.sql` still passes
 after risk checks have run, which shows the API never disturbed generator data.
 
 ---

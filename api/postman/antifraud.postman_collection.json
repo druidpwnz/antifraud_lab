@@ -1,0 +1,487 @@
+{
+  "info": {
+    "_postman_id": "6f1c2d9e-3b4a-4c5d-9e8f-a1b2c3d4e5f6",
+    "name": "Antifraud Lab API",
+    "description": "Requests and tests for the Antifraud Lab API.\n\nThe API key is set once, on the collection (Authorization tab), and every request inherits it - the same idea as the auth dependency on the /v1 router. Health checks opt out with No Auth; the wrong-key request sets its own.\n\nSet `apiKey` in the `local` environment before running.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "key",
+        "value": "X-API-Key",
+        "type": "string"
+      },
+      {
+        "key": "value",
+        "value": "{{apiKey}}",
+        "type": "string"
+      },
+      {
+        "key": "in",
+        "value": "header",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "nextCursor",
+      "value": ""
+    },
+    {
+      "key": "lastIdOnPage1",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "health",
+      "item": [
+        {
+          "name": "Health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 ok, without an API key\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json()).to.eql({ status: \"ok\" });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "Liveness. Needs no key and never touches the database."
+          }
+        },
+        {
+          "name": "Ready",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 when the database is reachable\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().status).to.equal(\"ready\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ready",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ready"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "Readiness. 200 when the database is reachable, 503 problem+json when it is not."
+          }
+        }
+      ]
+    },
+    {
+      "name": "players",
+      "item": [
+        {
+          "name": "List players - first page",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "const isPage = pm.response.code === 200 && Array.isArray(body.items);",
+                  "",
+                  "pm.test(\"200 with a page of results\", function () {",
+                  "    pm.expect(pm.response.code, `got ${pm.response.code}: ${body.detail || body.title || \"\"}`).to.equal(200);",
+                  "    pm.expect(body.items, \"response has no items\").to.be.an(\"array\");",
+                  "});",
+                  "",
+                  "if (isPage) {",
+                  "    pm.test(\"a page of 5, with a cursor for the next one\", function () {",
+                  "        pm.expect(body.items).to.have.lengthOf(5);",
+                  "        pm.expect(body.next_cursor).to.be.a(\"string\");",
+                  "    });",
+                  "",
+                  "    pm.test(\"ids are in ascending order\", function () {",
+                  "        const ids = body.items.map((p) => p.id);",
+                  "        pm.expect(ids).to.eql([...ids].sort((a, b) => a - b));",
+                  "    });",
+                  "",
+                  "    pm.test(\"each player has the documented shape\", function () {",
+                  "        pm.expect(body.items[0]).to.have.all.keys(\"id\", \"registered_at\", \"country\", \"currency\", \"status\");",
+                  "        pm.expect(body.items[0].registered_at).to.match(/Z$/);",
+                  "    });",
+                  "",
+                  "    // Saved for the next request, which asks for page 2 with it.",
+                  "    pm.collectionVariables.set(\"nextCursor\", body.next_cursor);",
+                  "    pm.collectionVariables.set(\"lastIdOnPage1\", body.items[body.items.length - 1].id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/players?limit=5",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "players"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List players - next page",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "const isPage = pm.response.code === 200 && Array.isArray(body.items);",
+                  "",
+                  "pm.test(\"200 with a page of results\", function () {",
+                  "    pm.expect(pm.response.code, `got ${pm.response.code}: ${body.detail || body.title || \"\"}`).to.equal(200);",
+                  "    pm.expect(body.items, \"response has no items\").to.be.an(\"array\");",
+                  "});",
+                  "",
+                  "if (isPage) {",
+                  "    pm.test(\"page 2 carries on exactly where page 1 stopped\", function () {",
+                  "        const lastIdOnPage1 = Number(pm.collectionVariables.get(\"lastIdOnPage1\"));",
+                  "        pm.expect(body.items[0].id).to.be.above(lastIdOnPage1);",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/players?limit=5&cursor={{nextCursor}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "players"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "5"
+                },
+                {
+                  "key": "cursor",
+                  "value": "{{nextCursor}}"
+                }
+              ]
+            },
+            "description": "Send 'List players - first page' before this one: it saves nextCursor."
+          }
+        },
+        {
+          "name": "List players - filtered",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "const isPage = pm.response.code === 200 && Array.isArray(body.items);",
+                  "",
+                  "pm.test(\"200 with a page of results\", function () {",
+                  "    pm.expect(pm.response.code, `got ${pm.response.code}: ${body.detail || body.title || \"\"}`).to.equal(200);",
+                  "    pm.expect(body.items, \"response has no items\").to.be.an(\"array\");",
+                  "});",
+                  "",
+                  "if (isPage) {",
+                  "    pm.test(\"every player matches both filters\", function () {",
+                  "        body.items.forEach((p) => {",
+                  "            pm.expect(p.country).to.equal(\"UA\");",
+                  "            pm.expect(p.status).to.equal(\"active\");",
+                  "        });",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/players?country=UA&status=active&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "players"
+              ],
+              "query": [
+                {
+                  "key": "country",
+                  "value": "UA"
+                },
+                {
+                  "key": "status",
+                  "value": "active"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get player",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200 with player 1\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().id).to.equal(1);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/players/1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "players",
+                "1"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Player not found - 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404 as problem+json\", function () {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.equal(\"application/problem+json\");",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.detail).to.equal(\"Player 999999999 does not exist.\");",
+                  "    pm.expect(body.instance).to.equal(\"/v1/players/999999999\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/players/999999999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "players",
+                "999999999"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Bad cursor - 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400 Invalid cursor\", function () {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().detail).to.equal(\"Invalid cursor.\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/players?cursor=not-a-cursor",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "players"
+              ],
+              "query": [
+                {
+                  "key": "cursor",
+                  "value": "not-a-cursor"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Limit too big - 422",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"422 says which field and why, and does not echo the input\", function () {",
+                  "    pm.response.to.have.status(422);",
+                  "    const errors = pm.response.json().errors;",
+                  "    pm.expect(errors, \"no errors list in the response\").to.be.an(\"array\").that.is.not.empty;",
+                  "    const error = errors[0];",
+                  "    pm.expect(error.loc).to.eql([\"query\", \"limit\"]);",
+                  "    pm.expect(error.type).to.equal(\"less_than_equal\");",
+                  "    pm.expect(error).to.not.have.property(\"input\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/players?limit=500",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "players"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "500"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Wrong API key - 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"401 with a WWW-Authenticate header\", function () {",
+                  "    pm.response.to.have.status(401);",
+                  "    pm.expect(pm.response.headers.get(\"WWW-Authenticate\")).to.equal('ApiKey header=\"X-API-Key\"');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/players/1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "players",
+                "1"
+              ]
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-API-Key",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "definitely-not-a-real-key",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Overrides the collection's API key for this one request."
+          }
+        }
+      ]
+    }
+  ]
+}
