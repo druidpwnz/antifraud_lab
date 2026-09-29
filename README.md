@@ -19,16 +19,20 @@ Advanced SQL is no longer the target — the rules layer stays deliberately thin
 | 3 | Fraud injector | **3 patterns done** |
 | 4 | Live generator | **done** (no metrics yet) |
 | 5 | Thin alerting (fills `alerts`) | **postponed** — after the API |
-| 6 | API — FastAPI | **next** |
+| 6 | API — FastAPI | **done** — 12 endpoints, 94 tests, Postman collection |
 | 7 | Flask admin panel | optional |
 | 8 | Compose, for real | not started |
 | 9 | Grafana + Prometheus — fraud alerting | not started |
 | 10 | CI | not started |
 
 Done so far: 14-table schema with constraints that hold, a seeded reproducible
-backfill (90 days = 9.7k players, 650k bets, ~10 min), `SETTLEMENT_ERROR` injection
-with ground truth in `fraud_labels`, and `db/tests/invariants.sql` — twelve checks
-that must hold at any dataset size, which raise and exit non-zero when they do not.
+backfill (90 days = 9.7k players, 650k bets, ~10 min), three planted fraud patterns
+with ground truth in `fraud_labels`, a live generator that carries on from the
+backfill, and `db/tests/invariants.sql` — twelve checks that must hold at any dataset
+size, which raise and exit non-zero when they do not.
+
+The API is in [`api/`](api/README.md): read access to players, money, bets and
+events, plus idempotent risk checks, with 94 tests and a Postman collection.
 
 ---
 
@@ -134,10 +138,13 @@ Budget: an evening, not a week. If a rule is hard, make it dumber.
 
 ---
 
-## Phase 6 — API (next)
+## Phase 6 — API (done)
 
 FastAPI over the same database, in `api/`. psycopg 3 with raw SQL and a connection
 pool, no ORM. No alert endpoints yet — those come back with phase 5.
+
+**How to run it, every endpoint, and the Postman setup: [`api/README.md`](api/README.md).**
+This section is the design and the reasons for it.
 
 ### The write endpoint is a risk check, not a transaction
 
@@ -171,6 +178,9 @@ time. The two clocks again.
 
 ### Endpoints
 
+All 12 are built and tested. The full reference — parameters, status codes, what
+each returns — is in [`api/README.md`](api/README.md#endpoints).
+
 - [x] `GET /health` (no DB) and `GET /ready` (`SELECT 1`, 503 if the DB is down)
 - [x] `GET /v1/players`, `GET /v1/players/{id}`
 - [x] `GET /v1/players/{id}/balance`, `/transactions`, `/bets`
@@ -180,21 +190,34 @@ time. The two clocks again.
 
 ### Build order — one step at a time, reviewed before the next
 
-1. Skeleton: settings, pool, `/health`, `/ready`
-2. Problem+json errors and API-key auth
-3. Players with cursor pagination
-4. Player balance, transactions, bets
-5. Bets and events with nested response models
-6. Migration 003 and risk checks with idempotency
-7. Postman collection in `api/postman/` — built alongside each step rather than at the end
-8. Update README, STATUS, CLAUDE.md
+- [x] 1. Skeleton: settings, pool, `/health`, `/ready`
+- [x] 2. Problem+json errors and API-key auth
+- [x] 3. Players with cursor pagination
+- [x] 4. Player balance, transactions, bets
+- [x] 5. Bets and events with nested response models
+- [x] 6. Migration 003 and risk checks with idempotency
+- [x] 7. Postman collection in `api/postman/`, built alongside each step
+- [x] 8. Docs: this section, `api/README.md`
 
-Tests are written with each step, against a separate `antifraud_test` database.
+Tests were written with each step, against a separate `antifraud_test` database:
+94 in the end, 16 of them for the risk rules alone with no database at all.
 
-**Postman collection:** `api/postman/`, with a `local` environment whose `apiKey`
-is empty in git and filled in inside Postman. Edits made in the app have to be
-exported back over the JSON to reach git. The same collection runs from the command
-line with Newman, which is what phase 10 CI will use.
+**Postman:** `api/postman/`, 24 requests with 38 checks, and a `local` environment
+whose `apiKey` is empty in git. Edits made in the app reach git only when exported
+back over the JSON. The same collection runs from the command line with Newman,
+which is what phase 10 CI will use. The setup problems met along the way —
+environment dropdown, the Vault, re-import not replacing — and their fixes are in
+[`api/README.md`](api/README.md#problems-we-hit-and-the-fix).
+
+### What was found by testing, not by planning
+
+- `Decimal("0")` serialises as `"0"`, so money got its own type that always has two
+  decimals.
+- A bet with two settlement rows would appear twice in a list and break paging — so
+  the join is `LEFT JOIN LATERAL … LIMIT 1`, and a test proves a plain join fails.
+- `HTTPStatus.UNPROCESSABLE_CONTENT` only exists from Python 3.13; the code uses 422.
+- Whether FastAPI commits before or after sending the response has changed between
+  versions, so the write endpoint commits explicitly before it answers.
 
 **Proof it works:** `/docs` shows every endpoint with its schemas and errors; `pytest`
 passes; the Postman collection passes under Newman; and `db/tests/invariants.sql` still passes
@@ -290,7 +313,9 @@ real database, generates real data, and asserts something that can actually brea
 
 ## Housekeeping
 
-- [ ] `CLAUDE.md` points at `PLAN.md`; the plan is this file. Rename one of them.
+- [ ] `CLAUDE.md` was never saved as a file, so its rules are not loaded automatically.
+      Decide whether to save it — and if so, record that the API phase ran as
+      "Claude writes, I review" rather than its teach-first default
 - [ ] Twelve `>= '2025-01-01'` CHECK floors in `001_schema.sql` — decide whether
       they earn their place, and whether a ceiling would catch more real bugs
 - [ ] One device and one payment method per player is unrealistically clean. Needed
