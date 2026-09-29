@@ -176,7 +176,7 @@ time. The two clocks again.
 - [x] `GET /v1/players/{id}/balance`, `/transactions`, `/bets`
 - [x] `GET /v1/bets/{id}` — nested legs and settlement
 - [x] `GET /v1/events`, `GET /v1/events/{id}` — nested markets and selections
-- [ ] `POST /v1/risk-checks`, `GET /v1/risk-checks/{id}`
+- [x] `POST /v1/risk-checks`, `GET /v1/risk-checks/{id}`
 
 ### Build order — one step at a time, reviewed before the next
 

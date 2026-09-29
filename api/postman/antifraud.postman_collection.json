@@ -43,6 +43,22 @@
       "value": ""
     },
     {
+      "key": "playerCurrency",
+      "value": ""
+    },
+    {
+      "key": "idempotencyKey",
+      "value": ""
+    },
+    {
+      "key": "riskCheckId",
+      "value": ""
+    },
+    {
+      "key": "riskCheckBody",
+      "value": ""
+    },
+    {
       "key": "lastIdOnPage1",
       "value": ""
     }
@@ -305,7 +321,10 @@
                   "pm.test(\"200 with player 1\", function () {",
                   "    pm.response.to.have.status(200);",
                   "    pm.expect(pm.response.json().id).to.equal(1);",
-                  "});"
+                  "});",
+                  "",
+                  "// the risk checks deposit in this player's own currency",
+                  "pm.collectionVariables.set(\"playerCurrency\", pm.response.json().currency);"
                 ]
               }
             }
@@ -906,6 +925,242 @@
                   "value": "2026-08-10T00:00:00Z"
                 }
               ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "risk checks",
+      "item": [
+        {
+          "name": "Risk check - new",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"idempotencyKey\", pm.variables.replaceIn(\"{{$guid}}\"));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "",
+                  "pm.test(\"201 Created, with a Location pointing at the stored check\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "    pm.expect(pm.response.headers.get(\"Location\")).to.equal(`/v1/risk-checks/${body.id}`);",
+                  "});",
+                  "",
+                  "pm.test(\"a decision, a score and the reasons for it\", function () {",
+                  "    pm.expect(body.decision).to.be.oneOf([\"approve\", \"review\", \"decline\"]);",
+                  "    pm.expect(body.score).to.be.within(0, 100);",
+                  "    pm.expect(body.reasons).to.be.an(\"array\");",
+                  "    pm.expect(body.amount).to.equal(\"10.00\");",
+                  "});",
+                  "",
+                  "pm.collectionVariables.set(\"riskCheckId\", body.id);",
+                  "pm.collectionVariables.set(\"riskCheckBody\", pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/risk-checks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "risk-checks"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"player_id\": 1,\n  \"direction\": \"deposit\",\n  \"amount\": \"10.00\",\n  \"currency\": \"{{playerCurrency}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Makes a new Idempotency-Key, which the next two requests reuse."
+          }
+        },
+        {
+          "name": "Risk check - retry, same key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200, marked as a replay, with exactly the first answer\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.headers.get(\"Idempotent-Replayed\")).to.equal(\"true\");",
+                  "    pm.expect(pm.response.json()).to.eql(JSON.parse(pm.collectionVariables.get(\"riskCheckBody\")));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/risk-checks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "risk-checks"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"player_id\": 1,\n  \"direction\": \"deposit\",\n  \"amount\": \"10.00\",\n  \"currency\": \"{{playerCurrency}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "The same key and the same body as 'Risk check - new': a client retrying after a timeout."
+          }
+        },
+        {
+          "name": "Risk check - same key, different body - 422",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"422: a key belongs to one request body\", function () {",
+                  "    pm.response.to.have.status(422);",
+                  "    pm.expect(pm.response.json().detail).to.include(\"different request body\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/risk-checks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "risk-checks"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"player_id\": 1,\n  \"direction\": \"deposit\",\n  \"amount\": \"11.00\",\n  \"currency\": \"{{playerCurrency}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Risk check - get",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200, the stored check\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json()).to.eql(JSON.parse(pm.collectionVariables.get(\"riskCheckBody\")));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/risk-checks/{{riskCheckId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "risk-checks",
+                "{{riskCheckId}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Risk check - no Idempotency-Key - 422",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"422 naming the missing header\", function () {",
+                  "    pm.response.to.have.status(422);",
+                  "    pm.expect(pm.response.json().errors[0].loc).to.eql([\"header\", \"idempotency-key\"]);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/risk-checks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "risk-checks"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"player_id\": 1,\n  \"direction\": \"deposit\",\n  \"amount\": \"10.00\",\n  \"currency\": \"{{playerCurrency}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         }

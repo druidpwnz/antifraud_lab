@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from psycopg import sql
 from pydantic import AwareDatetime
 
-from app import errors
+from app import errors, ledger
 from app.db import get_conn
 from app.pagination import PageParams, build_page
 from app.schemas.bets import BetStatus, BetSummary, BetSummaryPage
@@ -99,31 +99,12 @@ def get_balance(
     conn: psycopg.Connection = Depends(get_conn),
 ) -> Balance:
     player = load_player(conn, player_id)
-
-    # The same ledger as generator/state.py:load_balances, for one player. Four scalar
-    # subqueries rather than one big join: joining transactions to bets would multiply
-    # every deposit by every bet and the sums would be wrong.
-    totals = conn.execute(
-        """
-        SELECT
-          (SELECT coalesce(sum(amount), 0) FROM transactions
-           WHERE player_id = %(p)s AND direction = 'deposit' AND status = 'approved') AS deposited,
-          (SELECT coalesce(sum(amount), 0) FROM transactions
-           WHERE player_id = %(p)s AND direction = 'withdrawal' AND status <> 'rejected') AS withdrawn,
-          (SELECT coalesce(sum(stake), 0) FROM bets
-           WHERE player_id = %(p)s) AS staked,
-          (SELECT coalesce(sum(s.payout), 0) FROM settlements s
-           JOIN bets b ON b.id = s.bet_id
-           WHERE b.player_id = %(p)s) AS paid_out
-        """,
-        {"p": player_id},
-    ).fetchone()
-
+    t = ledger.totals(conn, player_id)
     return Balance(
         player_id=player_id,
         currency=player["currency"],
-        balance=totals["deposited"] - totals["withdrawn"] - totals["staked"] + totals["paid_out"],
-        **totals,
+        balance=ledger.balance(t),
+        **t,
     )
 
 

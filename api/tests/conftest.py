@@ -31,10 +31,20 @@ PLAYER_COUNT = 25
 PLAYER_WITH_MONEY = 1
 PLAYER_WITH_NOTHING = 2
 
+# Risk-check players, measured against the simulated clock SIM_NOW:
+#   player 3 deposited 400.00 thirty minutes ago and has not bet since - passthrough shape
+#   player 4 made three 20.00 deposits in the last hour - velocity
+#   player 7 is suspended (see fixture_player)
+PASSTHROUGH_PLAYER = 3
+VELOCITY_PLAYER = 4
+SUSPENDED_PLAYER = 7
+
 
 def at(day: int, hour: int = 10, minute: int = 0) -> datetime:
     return datetime(2026, 8, day, hour, minute, tzinfo=timezone.utc)
 
+
+SIM_NOW = at(12, 10)
 
 FIXTURE_TRANSACTIONS = [
     # direction, amount, status, created_at, processed_at
@@ -127,6 +137,9 @@ def seeded_db():
         has_schema = conn.execute("SELECT to_regclass('public.players') IS NOT NULL").fetchone()[0]
         if not has_schema:
             pytest.exit(f"'{dbname}' has no schema - run: bash reset.sh {dbname}")
+        has_risk_checks = conn.execute("SELECT to_regclass('public.risk_checks') IS NOT NULL").fetchone()[0]
+        if not has_risk_checks:
+            pytest.exit(f"'{dbname}' is missing migration 003 - run: bash reset.sh {dbname}")
 
         # events too: nothing about players references them, so CASCADE from players
         # alone would leave old matches behind and their ids would keep growing
@@ -139,7 +152,35 @@ def seeded_db():
             )
         selection_ids = load_events(conn)
         load_money_history(conn, PLAYER_WITH_MONEY, selection_ids)
+        load_risk_histories(conn)
+        # the simulated clock the risk checks measure against
+        conn.execute(
+            "INSERT INTO sim_state (id, sim_time, seed, days) VALUES (1, %s, 42, 14) "
+            "ON CONFLICT (id) DO UPDATE SET sim_time = EXCLUDED.sim_time",
+            (SIM_NOW,),
+        )
     yield
+
+
+def load_risk_histories(conn: psycopg.Connection) -> None:
+    """Deposits for the passthrough and velocity players. No bets for either."""
+    histories = {
+        PASSTHROUGH_PLAYER: [("400.00", at(12, 9, 25))],
+        VELOCITY_PLAYER: [("20.00", at(12, 9, 10)), ("20.00", at(12, 9, 20)), ("20.00", at(12, 9, 40))],
+    }
+    for player_id, deposits in histories.items():
+        method_id = conn.execute(
+            "INSERT INTO payment_methods (player_id, type, fingerprint, added_at) "
+            "VALUES (%s, 'crypto', %s, %s) RETURNING id",
+            (player_id, f"{player_id:02d}" * 32, at(2, 9)),
+        ).fetchone()[0]
+        for amount, created_at in deposits:
+            conn.execute(
+                "INSERT INTO transactions (player_id, method_id, direction, amount, currency, "
+                "status, created_at, processed_at) VALUES (%s, %s, 'deposit', %s, %s, 'approved', %s, %s)",
+                (player_id, method_id, amount, fixture_player(player_id)["currency"],
+                 created_at, created_at + timedelta(minutes=5)),
+            )
 
 
 def load_events(conn: psycopg.Connection) -> dict[tuple, int]:
