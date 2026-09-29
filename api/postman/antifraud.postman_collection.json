@@ -27,7 +27,19 @@
   },
   "variable": [
     {
+      "key": "playerId",
+      "value": "1"
+    },
+    {
       "key": "nextCursor",
+      "value": ""
+    },
+    {
+      "key": "betId",
+      "value": ""
+    },
+    {
+      "key": "eventId",
       "value": ""
     },
     {
@@ -479,6 +491,422 @@
               ]
             },
             "description": "Overrides the collection's API key for this one request."
+          }
+        }
+      ]
+    },
+    {
+      "name": "player money",
+      "item": [
+        {
+          "name": "Balance",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const b = pm.response.json();",
+                  "const cents = (s) => Math.round(Number(s) * 100);   // compare money as whole cents, never floats",
+                  "",
+                  "pm.test(\"200 with every amount as a 2-decimal string\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    [\"balance\", \"deposited\", \"withdrawn\", \"staked\", \"paid_out\"].forEach((k) => {",
+                  "        pm.expect(b[k], k).to.be.a(\"string\").and.match(/^-?\\d+\\.\\d{2}$/);",
+                  "    });",
+                  "});",
+                  "",
+                  "pm.test(\"balance = deposited - withdrawn - staked + paid_out\", function () {",
+                  "    pm.expect(cents(b.balance)).to.equal(",
+                  "        cents(b.deposited) - cents(b.withdrawn) - cents(b.staked) + cents(b.paid_out)",
+                  "    );",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/players/{{playerId}}/balance",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "players",
+                "{{playerId}}",
+                "balance"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Transactions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "const isPage = pm.response.code === 200 && Array.isArray(body.items);",
+                  "",
+                  "pm.test(\"200 with a page of results\", function () {",
+                  "    pm.expect(pm.response.code, `got ${pm.response.code}: ${body.detail || body.title || \"\"}`).to.equal(200);",
+                  "    pm.expect(body.items, \"response has no items\").to.be.an(\"array\");",
+                  "});",
+                  "",
+                  "if (isPage) {",
+                  "    pm.test(\"the payment method is nested, and the fingerprint is never sent\", function () {",
+                  "        pm.expect(body.items[0].method).to.have.all.keys(\"id\", \"type\", \"last4\");",
+                  "        pm.expect(pm.response.text()).to.not.include(\"fingerprint\");",
+                  "    });",
+                  "",
+                  "    pm.test(\"pending means no processed_at, and nothing else does\", function () {",
+                  "        body.items.forEach((t) => {",
+                  "            pm.expect(t.processed_at === null, `transaction ${t.id}`).to.equal(t.status === \"pending\");",
+                  "        });",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/players/{{playerId}}/transactions?limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "players",
+                "{{playerId}}",
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Bets",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "const isPage = pm.response.code === 200 && Array.isArray(body.items);",
+                  "",
+                  "pm.test(\"200 with a page of results\", function () {",
+                  "    pm.expect(pm.response.code, `got ${pm.response.code}: ${body.detail || body.title || \"\"}`).to.equal(200);",
+                  "    pm.expect(body.items, \"response has no items\").to.be.an(\"array\");",
+                  "});",
+                  "",
+                  "if (isPage) {",
+                  "    pm.test(\"a bet has a payout exactly when it is settled\", function () {",
+                  "        body.items.forEach((bet) => {",
+                  "            pm.expect(bet.payout === null, `bet ${bet.id}`).to.equal(bet.status === \"open\");",
+                  "        });",
+                  "    });",
+                  "",
+                  "    // for \"Bet detail\": the bet with the highest odds on this page - almost always a",
+                  "    // combo, which is the interesting case for checking that the legs multiply out",
+                  "    const combo = body.items.reduce((a, b) => (Number(b.total_odds) > Number(a.total_odds) ? b : a));",
+                  "    pm.collectionVariables.set(\"betId\", combo.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/players/{{playerId}}/bets?limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "players",
+                "{{playerId}}",
+                "bets"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Balance of unknown player - 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404 - an unknown player is never an empty 200\", function () {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().detail).to.equal(\"Player 999999999 does not exist.\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/players/999999999/balance",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "players",
+                "999999999",
+                "balance"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "bets and events",
+      "item": [
+        {
+          "name": "Bet detail",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const bet = pm.response.json();",
+                  "",
+                  "pm.test(\"200 with legs, each with its market and event\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(bet.legs).to.be.an(\"array\").that.is.not.empty;",
+                  "    bet.legs.forEach((leg) => {",
+                  "        pm.expect(leg.market).to.have.all.keys(\"id\", \"type\", \"line\");",
+                  "        pm.expect(leg.event).to.include.keys(\"home_team\", \"away_team\", \"start_time\");",
+                  "    });",
+                  "});",
+                  "",
+                  "pm.test(\"total_odds is the product of the legs' odds at placement\", function () {",
+                  "    // compared in thousandths, allowing 1 for rounding: the API rounds half-even,",
+                  "    // Math.round rounds half-up, and they can disagree on an exact tie",
+                  "    const product = bet.legs.reduce((p, leg) => p * Number(leg.odds_at_placement), 1);",
+                  "    const diff = Math.abs(Math.round(product * 1000) - Math.round(Number(bet.total_odds) * 1000));",
+                  "    pm.expect(diff).to.be.at.most(1);",
+                  "});",
+                  "",
+                  "pm.test(\"a settlement exactly when the bet is no longer open\", function () {",
+                  "    pm.expect(bet.settlement === null).to.equal(bet.status === \"open\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/bets/{{betId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "bets",
+                "{{betId}}"
+              ]
+            },
+            "description": "Send 'player money / Bets' first: it picks the bet."
+          }
+        },
+        {
+          "name": "Events - scheduled",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "const isPage = pm.response.code === 200 && Array.isArray(body.items);",
+                  "",
+                  "pm.test(\"200 with a page of results\", function () {",
+                  "    pm.expect(pm.response.code, `got ${pm.response.code}: ${body.detail || body.title || \"\"}`).to.equal(200);",
+                  "    pm.expect(body.items, \"response has no items\").to.be.an(\"array\");",
+                  "});",
+                  "",
+                  "if (isPage) {",
+                  "    pm.test(\"every event is scheduled\", function () {",
+                  "        body.items.forEach((e) => pm.expect(e.status, `event ${e.id}`).to.equal(\"scheduled\"));",
+                  "    });",
+                  "    pm.collectionVariables.set(\"eventId\", body.items[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/events?status=scheduled&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "scheduled"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Event detail",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const event = pm.response.json();",
+                  "",
+                  "pm.test(\"200 with markets, each with its selections\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(event.markets).to.be.an(\"array\").that.is.not.empty;",
+                  "    event.markets.forEach((m) => {",
+                  "        pm.expect(m.selections, `market ${m.id}`).to.be.an(\"array\").that.is.not.empty;",
+                  "    });",
+                  "});",
+                  "",
+                  "pm.test(\"every price is above 1.00\", function () {",
+                  "    event.markets.forEach((m) => m.selections.forEach((s) => {",
+                  "        pm.expect(Number(s.current_odds), `selection ${s.id}`).to.be.above(1);",
+                  "    }));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/events/{{eventId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "events",
+                "{{eventId}}"
+              ]
+            },
+            "description": "Send 'Events - scheduled' first: it picks the event."
+          }
+        },
+        {
+          "name": "Event not found - 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404 as problem+json\", function () {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().detail).to.equal(\"Event 999999999 does not exist.\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/events/999999999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "events",
+                "999999999"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Kickoff window backwards - 422",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"422 when from is not before to\", function () {",
+                  "    pm.response.to.have.status(422);",
+                  "    pm.expect(pm.response.json().detail).to.equal(\"`from` must be earlier than `to`.\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/events?from=2026-08-11T00:00:00Z&to=2026-08-10T00:00:00Z",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-08-11T00:00:00Z"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-08-10T00:00:00Z"
+                }
+              ]
+            }
           }
         }
       ]

@@ -171,11 +171,11 @@ time. The two clocks again.
 
 ### Endpoints
 
-- [ ] `GET /health` (no DB) and `GET /ready` (`SELECT 1`, 503 if the DB is down)
-- [ ] `GET /v1/players`, `GET /v1/players/{id}`
-- [ ] `GET /v1/players/{id}/balance`, `/transactions`, `/bets`
-- [ ] `GET /v1/bets/{id}` — nested legs and settlement
-- [ ] `GET /v1/events`, `GET /v1/events/{id}` — nested markets and selections
+- [x] `GET /health` (no DB) and `GET /ready` (`SELECT 1`, 503 if the DB is down)
+- [x] `GET /v1/players`, `GET /v1/players/{id}`
+- [x] `GET /v1/players/{id}/balance`, `/transactions`, `/bets`
+- [x] `GET /v1/bets/{id}` — nested legs and settlement
+- [x] `GET /v1/events`, `GET /v1/events/{id}` — nested markets and selections
 - [ ] `POST /v1/risk-checks`, `GET /v1/risk-checks/{id}`
 
 ### Build order — one step at a time, reviewed before the next

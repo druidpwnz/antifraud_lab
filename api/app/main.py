@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, FastAPI
 
 from app import db, errors, settings
 from app.auth import require_api_key
-from app.routers import health, players
+from app.routers import bets, events, health, players
 
 
 @asynccontextmanager
@@ -47,5 +47,7 @@ v1 = APIRouter(
     responses=errors.responses(401, 422, 500),
 )
 v1.include_router(players.router)
+v1.include_router(bets.router)
+v1.include_router(events.router)
 
 app.include_router(v1)
