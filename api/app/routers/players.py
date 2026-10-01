@@ -16,7 +16,8 @@ from pydantic import AwareDatetime
 from app import errors, ledger
 from app.db import get_conn
 from app.pagination import PageParams, build_page
-from app.schemas.bets import BetStatus, BetSummary, BetSummaryPage
+from app.routers.bets import bet_summary_page
+from app.schemas.bets import BetStatus, BetSummaryPage
 from app.schemas.players import Balance, Player, PlayerPage, PlayerStatus
 from app.schemas.transactions import PaymentMethod, Transaction, TransactionPage
 
@@ -43,8 +44,8 @@ def list_players(
     # Built from fixed SQL fragments with psycopg.sql - never from the caller's input.
     # Every value goes in as a parameter, so this is not the f-string-in-SQL mistake
     # even though the WHERE clause is assembled at runtime.
-    conditions = [sql.SQL("id > %(after_id)s")]
-    params: dict = {"after_id": page.after_id, "limit": page.limit + 1}
+    conditions = [page.after_cursor("id")]
+    params = page.params()
 
     if country is not None:
         conditions.append(sql.SQL("country = %(country)s"))
@@ -57,8 +58,9 @@ def list_players(
         params["registered_after"] = registered_after
 
     query = sql.SQL(
-        "SELECT {columns} FROM players WHERE {where} ORDER BY id LIMIT %(limit)s"
-    ).format(columns=PLAYER_COLUMNS, where=sql.SQL(" AND ").join(conditions))
+        "SELECT {columns} FROM players WHERE {where} ORDER BY {order} LIMIT %(limit)s"
+    ).format(columns=PLAYER_COLUMNS, where=sql.SQL(" AND ").join(conditions),
+             order=page.order_by("id"))
 
     rows = conn.execute(query, params).fetchall()
     return build_page(rows, page, Player.model_validate, PlayerPage)
@@ -124,8 +126,8 @@ def list_transactions(
 ) -> TransactionPage:
     load_player(conn, player_id)
 
-    conditions = [sql.SQL("t.player_id = %(player_id)s"), sql.SQL("t.id > %(after_id)s")]
-    params: dict = {"player_id": player_id, "after_id": page.after_id, "limit": page.limit + 1}
+    conditions = [sql.SQL("t.player_id = %(player_id)s"), page.after_cursor("t", "id")]
+    params = {**page.params(), "player_id": player_id}
     if direction is not None:
         conditions.append(sql.SQL("t.direction = %(direction)s"))
         params["direction"] = direction
@@ -143,10 +145,10 @@ def list_transactions(
         FROM transactions t
         JOIN payment_methods m ON m.id = t.method_id
         WHERE {where}
-        ORDER BY t.id
+        ORDER BY {order}
         LIMIT %(limit)s
         """
-    ).format(where=sql.SQL(" AND ").join(conditions))
+    ).format(where=sql.SQL(" AND ").join(conditions), order=page.order_by("t", "id"))
 
     rows = conn.execute(query, params).fetchall()
     return build_page(rows, page, transaction_from_row, TransactionPage)
@@ -174,32 +176,10 @@ def list_bets(
 ) -> BetSummaryPage:
     load_player(conn, player_id)
 
-    conditions = [sql.SQL("b.player_id = %(player_id)s"), sql.SQL("b.id > %(after_id)s")]
-    params: dict = {"player_id": player_id, "after_id": page.after_id, "limit": page.limit + 1}
+    conditions = [sql.SQL("b.player_id = %(player_id)s")]
+    params: dict = {"player_id": player_id}
     if status is not None:
         conditions.append(sql.SQL("b.status = %(status)s"))
         params["status"] = status
 
-    # LEFT JOIN LATERAL ... LIMIT 1, not a plain LEFT JOIN: the schema does not stop a
-    # bet having two settlement rows, and a plain join would then return that bet
-    # twice - and a duplicated row breaks cursor pagination. The generator never
-    # settles twice (invariants.sql checks it), but the API should not depend on that.
-    query = sql.SQL(
-        """
-        SELECT b.id, b.placed_at, b.stake, b.currency, b.total_odds, b.status,
-               s.payout, s.settled_at
-        FROM bets b
-        LEFT JOIN LATERAL (
-            SELECT payout, settled_at FROM settlements
-            WHERE bet_id = b.id
-            ORDER BY settled_at DESC
-            LIMIT 1
-        ) s ON true
-        WHERE {where}
-        ORDER BY b.id
-        LIMIT %(limit)s
-        """
-    ).format(where=sql.SQL(" AND ").join(conditions))
-
-    rows = conn.execute(query, params).fetchall()
-    return build_page(rows, page, BetSummary.model_validate, BetSummaryPage)
+    return bet_summary_page(conn, page, conditions, params)

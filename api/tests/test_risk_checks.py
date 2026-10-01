@@ -239,3 +239,51 @@ def test_risk_checks_never_touch_the_generators_tables(client):
         check(client, **withdrawal(PLAYER_WITH_MONEY, amount))
 
     assert counts() == before
+
+
+# ------------------------------------------------------------------ scopes
+
+def test_a_read_only_key_cannot_create_a_risk_check(client):
+    from tests.conftest import READ_KEY
+
+    response = client.post(
+        "/v1/risk-checks",
+        json=deposit(PLAYER_WITH_MONEY, "10.00"),
+        headers={"X-API-Key": READ_KEY, "Idempotency-Key": str(uuid.uuid4())},
+    )
+
+    assert response.status_code == 403
+
+
+def test_the_403_comes_before_validation(client):
+    # A caller that may not create risk checks learns nothing about what a valid
+    # request would look like: a broken body and a missing Idempotency-Key still
+    # get the 403, not a 422 that explains the problem.
+    from tests.conftest import READ_KEY
+
+    response = client.post("/v1/risk-checks", json={"nonsense": True},
+                           headers={"X-API-Key": READ_KEY})
+
+    assert response.status_code == 403
+
+
+def test_a_read_only_key_can_still_read_a_risk_check(client):
+    from tests.conftest import READ_KEY
+
+    created = check(client, **deposit(PLAYER_WITH_MONEY, "10.00"))
+    response = client.get(created.headers["location"], headers={"X-API-Key": READ_KEY})
+
+    assert response.status_code == 200
+
+
+def test_a_read_only_key_reads_everything_else(client):
+    from tests.conftest import READ_KEY
+
+    for url in ("/v1/players", "/v1/players/1/balance", "/v1/bets/1", "/v1/events"):
+        assert client.get(url, headers={"X-API-Key": READ_KEY}).status_code == 200, url
+
+
+def test_openapi_documents_the_403(client):
+    responses = client.get("/openapi.json").json()["paths"]["/v1/risk-checks"]["post"]["responses"]
+
+    assert "403" in responses

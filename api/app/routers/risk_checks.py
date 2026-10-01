@@ -33,6 +33,7 @@ from psycopg import sql
 from psycopg.types.json import Jsonb
 
 from app import errors, ledger, scoring
+from app.auth import CREATE_RISK_CHECKS, require_scope
 from app.db import get_conn
 from app.routers.players import load_player
 from app.schemas.risk_checks import RiskCheck, RiskCheckRequest
@@ -51,10 +52,12 @@ CENT = Decimal("0.01")
     summary="Score a proposed deposit or withdrawal",
     status_code=HTTPStatus.CREATED,
     response_model=RiskCheck,
+    # needs a full-access key; a read-only key is a 403
+    dependencies=[Depends(require_scope(CREATE_RISK_CHECKS))],
     responses={
         200: {"model": RiskCheck, "description": "A replay: this Idempotency-Key was "
               "already used with the same body, and this is the decision made then."},
-        **errors.responses(404, 503),
+        **errors.responses(403, 404, 503),
     },
 )
 def create_risk_check(

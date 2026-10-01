@@ -14,6 +14,7 @@ class BetSummary(BaseModel):
     """A bet as it appears in a list. The legs are in GET /v1/bets/{id}."""
 
     id: int
+    player_id: int
     placed_at: datetime
     stake: Money
     currency: str

@@ -35,6 +35,10 @@
       "value": ""
     },
     {
+      "key": "descCursor",
+      "value": ""
+    },
+    {
       "key": "betId",
       "value": ""
     },
@@ -308,6 +312,100 @@
                 }
               ]
             }
+          }
+        },
+        {
+          "name": "List players - newest first",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "const isPage = pm.response.code === 200 && Array.isArray(body.items);",
+                  "",
+                  "pm.test(\"200 with a page of results\", function () {",
+                  "    pm.expect(pm.response.code, `got ${pm.response.code}: ${body.detail || body.title || \"\"}`).to.equal(200);",
+                  "    pm.expect(body.items, \"response has no items\").to.be.an(\"array\");",
+                  "});",
+                  "",
+                  "if (isPage) {",
+                  "    pm.test(\"ids go down\", function () {",
+                  "        const ids = body.items.map((p) => p.id);",
+                  "        pm.expect(ids).to.eql([...ids].sort((a, b) => b - a));",
+                  "    });",
+                  "    pm.collectionVariables.set(\"descCursor\", body.next_cursor);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/players?order=desc&limit=5",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "players"
+              ],
+              "query": [
+                {
+                  "key": "order",
+                  "value": "desc"
+                },
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Cursor used with the other order - 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400: a newest-first cursor cannot continue an oldest-first list\", function () {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().detail).to.equal(\"This cursor was made for order=desc; ask with the same order.\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/players?order=asc&cursor={{descCursor}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "players"
+              ],
+              "query": [
+                {
+                  "key": "order",
+                  "value": "asc"
+                },
+                {
+                  "key": "cursor",
+                  "value": "{{descCursor}}"
+                }
+              ]
+            },
+            "description": "Uses the cursor 'List players - newest first' saved."
           }
         },
         {
@@ -709,6 +807,114 @@
     {
       "name": "bets and events",
       "item": [
+        {
+          "name": "All bets - newest first",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "const isPage = pm.response.code === 200 && Array.isArray(body.items);",
+                  "",
+                  "pm.test(\"200 with a page of results\", function () {",
+                  "    pm.expect(pm.response.code, `got ${pm.response.code}: ${body.detail || body.title || \"\"}`).to.equal(200);",
+                  "    pm.expect(body.items, \"response has no items\").to.be.an(\"array\");",
+                  "});",
+                  "",
+                  "if (isPage) {",
+                  "    pm.test(\"newest first, each bet saying whose it is\", function () {",
+                  "        const ids = body.items.map((b) => b.id);",
+                  "        pm.expect(ids).to.eql([...ids].sort((a, b) => b - a));",
+                  "        body.items.forEach((b) => pm.expect(b.player_id, `bet ${b.id}`).to.be.a(\"number\"));",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/bets?order=desc&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "bets"
+              ],
+              "query": [
+                {
+                  "key": "order",
+                  "value": "desc"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "All bets - stakes of 500 or more",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "const isPage = pm.response.code === 200 && Array.isArray(body.items);",
+                  "",
+                  "pm.test(\"200 with a page of results\", function () {",
+                  "    pm.expect(pm.response.code, `got ${pm.response.code}: ${body.detail || body.title || \"\"}`).to.equal(200);",
+                  "    pm.expect(body.items, \"response has no items\").to.be.an(\"array\");",
+                  "});",
+                  "",
+                  "if (isPage) {",
+                  "    pm.test(\"every stake is at least 500.00\", function () {",
+                  "        body.items.forEach((b) => {",
+                  "            pm.expect(Math.round(Number(b.stake) * 100), `bet ${b.id}`).to.be.at.least(50000);",
+                  "        });",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/bets?min_stake=500.00&order=desc&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "bets"
+              ],
+              "query": [
+                {
+                  "key": "min_stake",
+                  "value": "500.00"
+                },
+                {
+                  "key": "order",
+                  "value": "desc"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            }
+          }
+        },
         {
           "name": "Bet detail",
           "event": [
@@ -1122,6 +1328,126 @@
                 "{{riskCheckId}}"
               ]
             }
+          }
+        },
+        {
+          "name": "Read-only key can read a risk check - 200",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"200: a read key reads everything\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().id).to.equal(Number(pm.collectionVariables.get(\"riskCheckId\")));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/risk-checks/{{riskCheckId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "risk-checks",
+                "{{riskCheckId}}"
+              ]
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-API-Key",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "{{readApiKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Uses readApiKey from the environment - a key from API_READ_KEYS, like the admin panel's."
+          }
+        },
+        {
+          "name": "Read-only key cannot create a risk check - 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"403, not 401: the key is real, it just may not do this\", function () {",
+                  "    pm.response.to.have.status(403);",
+                  "    pm.expect(pm.response.json().detail).to.include(\"risk_checks:create\");",
+                  "    pm.expect(pm.response.headers.has(\"WWW-Authenticate\")).to.be.false;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/risk-checks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "risk-checks"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"player_id\": 1,\n  \"direction\": \"deposit\",\n  \"amount\": \"10.00\",\n  \"currency\": \"{{playerCurrency}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-API-Key",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "{{readApiKey}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Uses readApiKey from the environment. 401 would mean a wrong key; 403 means a right key without the scope."
           }
         },
         {

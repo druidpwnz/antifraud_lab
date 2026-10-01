@@ -76,5 +76,83 @@ def test_openapi_has_the_api_key_security_scheme():
         "type": "apiKey",
         "in": "header",
         "name": "X-API-Key",
-        "description": "One of the keys configured in the API_KEYS environment variable.",
+        "description": "A key from API_KEYS (full access) or API_READ_KEYS (read only).",
     }
+
+
+# ---------------------------------------------------------------- scopes
+
+from app import auth  # noqa: E402
+from app.auth import CREATE_RISK_CHECKS, require_scope  # noqa: E402
+
+
+def make_scoped_client(full=("full",), read=("read",)) -> TestClient:
+    """An app shaped like the real one: the key check on the router, and one route
+    that needs an extra scope."""
+    from fastapi import APIRouter
+
+    app = FastAPI()
+    errors.install(app)
+    app.state.settings = Settings(database_url="", api_keys=full, api_read_keys=read,
+                                  pool_min=1, pool_max=1)
+    router = APIRouter(dependencies=[Depends(require_api_key)])
+
+    @router.get("/thing")
+    def read_thing():
+        return {"ok": True}
+
+    @router.post("/thing", dependencies=[Depends(require_scope(CREATE_RISK_CHECKS))])
+    def create_thing():
+        return {"created": True}
+
+    app.include_router(router)
+    return TestClient(app)
+
+
+def test_a_read_key_can_read():
+    response = make_scoped_client().get("/thing", headers={"X-API-Key": "read"})
+
+    assert response.status_code == 200
+
+
+def test_a_read_key_cannot_create_403():
+    response = make_scoped_client().post("/thing", headers={"X-API-Key": "read"})
+
+    assert response.status_code == 403
+    assert response.headers["content-type"] == "application/problem+json"
+    assert "risk_checks:create" in response.json()["detail"]
+    assert "www-authenticate" not in response.headers    # that header belongs to 401
+
+
+def test_a_full_key_can_create():
+    response = make_scoped_client().post("/thing", headers={"X-API-Key": "full"})
+
+    assert response.status_code == 200
+
+
+def test_a_wrong_key_is_still_401_not_403():
+    # 403 means "I know you, and you may not". A wrong key is not known at all.
+    client = make_scoped_client()
+
+    assert client.post("/thing", headers={"X-API-Key": "nope"}).status_code == 401
+    assert client.post("/thing").status_code == 401
+
+
+def test_read_keys_are_optional():
+    client = make_scoped_client(read=())
+
+    assert client.get("/thing", headers={"X-API-Key": "full"}).status_code == 200
+    assert client.get("/thing", headers={"X-API-Key": "read"}).status_code == 401
+
+
+def test_the_key_is_checked_once_per_request_not_twice(monkeypatch):
+    # Both the router and require_scope ask for require_api_key. FastAPI caches a
+    # dependency's result within one request, so it must run once: one comparison
+    # against each of the two key lists, not two of each.
+    calls = []
+    real = auth._matches_any
+    monkeypatch.setattr(auth, "_matches_any", lambda c, k: calls.append(k) or real(c, k))
+
+    make_scoped_client().post("/thing", headers={"X-API-Key": "full"})
+
+    assert len(calls) == 2

@@ -22,7 +22,7 @@ pip install -r api/requirements.txt
 psql antifraud -v ON_ERROR_STOP=1 --single-transaction -f db/migrations/003_risk_checks.sql
 # (a fresh one: bash reset.sh && python generator/backfill.py - reset.sh DROPS the database)
 
-cp api/.env.example api/.env        # DATABASE_URL, API_KEYS, POOL_MIN, POOL_MAX
+cp api/.env.example api/.env        # DATABASE_URL, API_KEYS, API_READ_KEYS, POOL_MIN, POOL_MAX
 ```
 
 Then, from `api/`:
@@ -32,6 +32,7 @@ uvicorn app.main:app --reload --env-file .env
 ```
 
 - Interactive docs: http://localhost:8000/docs — **Authorize** with a key from `API_KEYS`
+  (or `API_READ_KEYS`, to see what a read-only caller gets)
 - `--reload` watches the code, not `.env`. Change `.env`, restart uvicorn.
 - Risk checks need `sim_state` to have a row, which the backfill writes. Without it,
   `POST /v1/risk-checks` answers 503.
@@ -40,7 +41,7 @@ uvicorn app.main:app --reload --env-file .env
 
 ```bash
 bash reset.sh antifraud_test        # once, and again after a new migration
-cd api && pytest -q                 # 94 tests
+cd api && pytest -q                 # 120 tests
 ```
 
 - Tests run against **`antifraud_test`**, never `antifraud`. The fixture wipes it and
@@ -53,22 +54,35 @@ cd api && pytest -q                 # 94 tests
 
 ## Endpoints
 
-Everything under `/v1` needs an `X-API-Key` header. Every error, of any kind, is
+Everything under `/v1` needs an `X-API-Key` header, of one of two kinds:
+
+| Key from | May | Who gets one |
+|---|---|---|
+| `API_KEYS` | read everything, and create risk checks | Postman, a payment gateway |
+| `API_READ_KEYS` | read everything | the admin panel |
+
+No key or a wrong key is **401**. A real read-only key on `POST /v1/risk-checks` is
+**403** — the key is fine, it just may not do this, so retrying with it never helps.
+The 403 comes before validation: a caller without the scope learns nothing about
+what a valid request would look like.
+
+Every error, of any kind, is
 `application/problem+json` (see [Errors](#errors)).
 
 | Method | Path | Query / body | Success | Errors |
 |---|---|---|---|---|
 | GET | `/health` | — | 200 | — |
 | GET | `/ready` | — | 200 | 503 database unreachable |
-| GET | `/v1/players` | `limit` `cursor` `country` `status` `registered_after` | 200 page | 400 401 422 |
+| GET | `/v1/players` | `limit` `cursor` `order` `country` `status` `registered_after` | 200 page | 400 401 422 |
 | GET | `/v1/players/{id}` | — | 200 | 401 404 422 |
 | GET | `/v1/players/{id}/balance` | — | 200 | 401 404 422 |
-| GET | `/v1/players/{id}/transactions` | `limit` `cursor` `direction` `status` `since` | 200 page | 400 401 404 422 |
-| GET | `/v1/players/{id}/bets` | `limit` `cursor` `status` | 200 page | 400 401 404 422 |
+| GET | `/v1/players/{id}/transactions` | `limit` `cursor` `order` `direction` `status` `since` | 200 page | 400 401 404 422 |
+| GET | `/v1/players/{id}/bets` | `limit` `cursor` `order` `status` | 200 page | 400 401 404 422 |
+| GET | `/v1/bets` | `limit` `cursor` `order` `status` `min_stake` `placed_after` | 200 page | 400 401 422 |
 | GET | `/v1/bets/{id}` | — | 200 | 401 404 422 |
-| GET | `/v1/events` | `limit` `cursor` `status` `league` `from` `to` | 200 page | 400 401 422 |
+| GET | `/v1/events` | `limit` `cursor` `order` `status` `league` `from` `to` | 200 page | 400 401 422 |
 | GET | `/v1/events/{id}` | — | 200 | 401 404 422 |
-| POST | `/v1/risk-checks` | header `Idempotency-Key`; body below | 201 new, 200 replay | 401 404 422 503 |
+| POST | `/v1/risk-checks` | header `Idempotency-Key`; body below | 201 new, 200 replay | 401 **403** 404 422 503 |
 
 Any endpoint can also answer 500. A 422 on a `{id}` path means the id is not a
 positive integer.
@@ -81,6 +95,8 @@ What each one returns:
 - **`/v1/players/{id}/transactions`** — each with its payment method nested (`type`,
   `last4`). The card **fingerprint is never sent**: it is what links accounts.
 - **`/v1/players/{id}/bets`** — each with `payout` and `settled_at`, `null` while open.
+- **`/v1/bets`** — the same, across every player, each bet carrying its `player_id`.
+  The back-office feed: usually asked for with `order=desc`.
 - **`/v1/bets/{id}`** — every leg with its market and match, `odds_at_placement`
   (the price that counts, not today's), and the settlement or `null`.
 - **`/v1/events`** — `from` inclusive, `to` exclusive; `from` must be before `to`.
@@ -93,6 +109,13 @@ What each one returns:
 `next_cursor` back as `cursor` for the next page; it is `null` on the last page.
 Cursors are opaque — do not build one — and a garbage cursor is a 400. Ordered by
 `id`, which is what keeps paging stable while the live generator inserts rows.
+
+`order=asc` (the default) is oldest first, `order=desc` newest first. A cursor
+remembers which one it was made for, and using it with the other is a 400 — "after
+id 4812" means opposite things in the two directions. One difference worth knowing:
+paging oldest first, rows created meanwhile turn up on a later page; paging newest
+first, they never appear, because they are above where you started — start again
+from the top to see them.
 
 **Money** is a string with exactly two decimals: `"105.00"`, `"0.00"`. Odds and
 market lines are strings too (`"2.250"`, `"2.50"`). Never parse them into floats.
@@ -161,13 +184,14 @@ hard rule is a decline with score 100, and all of them are reported, not just th
 
 ## Postman
 
-`postman/antifraud.postman_collection.json` — 24 requests in five folders, 38 checks.
-`postman/local.postman_environment.json` — `baseUrl`, and `apiKey` left empty.
+`postman/antifraud.postman_collection.json` — 30 requests in five folders, 47 checks.
+`postman/local.postman_environment.json` — `baseUrl`, and `apiKey` and `readApiKey` left empty.
 
 ### Setup
 
 1. **Import** both files.
-2. **Environments → local →** put your key in `apiKey`'s **Current value** → **Ctrl+S**.
+2. **Environments → local →** put a key from `API_KEYS` in `apiKey`'s **Current value**, and
+   one from `API_READ_KEYS` in `readApiKey`'s → **Ctrl+S**.
 3. Choose **local** in the **environment dropdown, top right**.
 4. Start uvicorn, then collection **⋯ → Run collection**.
 
@@ -186,6 +210,7 @@ folders top to bottom**, or send the earlier request first.
 | `getaddrinfo ENOTFOUND {{baseurl}}` | No environment is active. Opening one in the sidebar only *edits* it | Pick **local** in the dropdown, top right |
 | Every `/v1` request is 401, `X-API-Key:` empty in the Console | `apiKey` has no **Current value** in the *active* environment | Fill Current value, **Ctrl+S** |
 | Still empty after typing the key | Postman stored it in the **Vault**, which is `{{vault:apiKey}}`, not `{{apiKey}}` | Put the key in the environment instead; decline "move to Vault" |
+| *Read-only key cannot create…* gets 401, not 403 | `readApiKey` is empty, or the server has no `API_READ_KEYS` | Fill `readApiKey`; add `API_READ_KEYS` to `api/.env` and restart uvicorn |
 | Two environments called `local` | Imported twice, or one created by hand | Delete the one without `baseUrl` |
 | Re-import makes a second collection instead of replacing | Postman matches collections by `info._postman_id` | The file now has a fixed id; if Replace is still not offered, delete the old collection, then import |
 | `Cannot read properties of undefined (reading 'map')` | Old scripts crashed on a non-page response (usually a 401) | Fixed: list requests now fail with `got 401: …` instead |
@@ -206,7 +231,8 @@ workspace, and edits made there do not reach git until you **Export** the collec
 ```bash
 npx newman run api/postman/antifraud.postman_collection.json \
     -e api/postman/local.postman_environment.json \
-    --env-var apiKey=dev-key-change-me
+    --env-var apiKey=dev-key-change-me \
+    --env-var readApiKey=dev-read-key-change-me
 ```
 
 Same collection, same checks, no account, no run limit, and a non-zero exit code on
@@ -222,13 +248,13 @@ api/
     main.py            app, lifespan (pool), routers - the /v1 router carries the API-key check
     settings.py        environment variables
     db.py              connection pool and the get_conn dependency
-    auth.py            X-API-Key check
+    auth.py            X-API-Key check, the two kinds of key, 401 vs 403
     errors.py          problem+json for every failure
-    pagination.py      opaque cursors, limit + 1 paging
+    pagination.py      opaque cursors, asc/desc, limit + 1 paging - routers never write id > ... themselves
     ledger.py          a player's balance - shared by /balance and the risk rules
     scoring.py         the risk rules, pure functions
     schemas/           request and response models
     routers/           health, players, bets, events, risk_checks
-  tests/               94 tests against antifraud_test
+  tests/               120 tests against antifraud_test
   postman/             collection and environment
 ```

@@ -16,7 +16,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "dbname=antifraud_test")
-API_KEY = "test-key"
+API_KEY = "test-key"              # full access
+READ_KEY = "test-read-key"        # read only, like the admin panel's
 
 COUNTRIES = ["UA", "PL", "DE", "GB", "ES"]
 CURRENCY = {"UA": "UAH", "PL": "PLN", "DE": "EUR", "GB": "GBP", "ES": "EUR"}
@@ -247,6 +248,7 @@ def client(monkeypatch, seeded_db):
     `with` runs the app's lifespan, so the pool opens before the test and closes after."""
     monkeypatch.setenv("DATABASE_URL", TEST_DATABASE_URL)
     monkeypatch.setenv("API_KEYS", API_KEY)
+    monkeypatch.setenv("API_READ_KEYS", READ_KEY)
     from app.main import app
 
     with TestClient(app, headers={"X-API-Key": API_KEY}) as c:

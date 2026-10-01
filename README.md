@@ -20,10 +20,10 @@ Advanced SQL is no longer the target — the rules layer stays deliberately thin
 | 4 | Live generator | **done** (no metrics yet) |
 | 5 | Thin alerting (fills `alerts`) | **postponed** — after the API |
 | 6 | API — FastAPI | **done** — 12 endpoints, 94 tests, Postman collection |
-| 7 | Flask admin panel | optional |
+| 7 | Admin panel — Flask + Jinja + HTMX, over the API | **next** |
 | 8 | Compose, for real | not started |
 | 9 | Grafana + Prometheus — fraud alerting | not started |
-| 10 | CI | not started |
+| 10 | CI/CD — GitHub Actions | not started |
 
 Done so far: 14-table schema with constraints that hold, a seeded reproducible
 backfill (90 days = 9.7k players, 650k bets, ~10 min), three planted fraud patterns
@@ -38,16 +38,27 @@ events, plus idempotent risk checks, with 94 tests and a Postman collection.
 
 ## Decisions
 
-**1. One web framework or two? — SETTLED.** FastAPI for the API, Flask-Admin as a
-separate small service against the same database. Two services, as a real back
-office has: the public API and the internal admin panel are rarely the same app.
+**1. One web framework or two? — SETTLED.** FastAPI for the API; plain Flask with
+Jinja templates and HTMX for the admin panel. Two services, as a real back office
+has: the public API and the internal panel are rarely the same app. (Flask-Admin was
+the first plan, and was dropped: it generates CRUD screens straight from database
+models, which is the opposite of the next decision.)
 
-**2. Does the admin panel share models with the API? — SETTLED: no.** The API uses
-psycopg 3 and raw SQL with a connection pool. Flask-Admin will get its own small
-SQLAlchemy models when phase 7 starts.
+**2. Does the admin panel touch the database? — SETTLED: no.** The panel is an API
+client like any other. It reads through `/v1`, so every rule — auth, validation,
+the card fingerprint never leaving — lives in exactly one place, and the panel
+proves the API is enough to build a real product on. Where the panel needs
+something the API cannot do, the API is extended; the panel never reaches round it.
 
 **3. Alerts before or after the API? — SETTLED: after.** The API ships without alert
 endpoints; phase 5 and the alert endpoints come back in a later update.
+
+**4. CI/CD — SETTLED: GitHub Actions.** The repo is already on GitHub, so the
+pipeline lives next to the code as workflow files in `.github/workflows/`, versioned
+and reviewed like any other file. Postgres runs as a service container, images go to
+the GitHub Container Registry (`ghcr.io`) using the workflow's own `GITHUB_TOKEN` —
+no second account, no long-lived registry password — and anything secret lives in
+GitHub Actions secrets, never in the repo.
 
 ---
 
@@ -225,19 +236,119 @@ after risk checks have run, which shows the API never disturbed generator data.
 
 ---
 
-## Phase 7 — Flask admin panel (optional)
+## Phase 7 — Admin panel (next)
 
-A back office over the same tables, built fast with third-party modules rather than
-by hand. The point is learning the ecosystem, not the UI.
+A back office for looking into players, their money, bets and matches. Flask renders
+Jinja templates; HTMX swaps pieces of the page without a JavaScript framework; every
+byte of data comes from the API.
 
-- [ ] `Flask-SQLAlchemy` models for the tables the admin touches
-- [ ] `Flask-Admin` model views: alerts, players, transactions
-- [ ] `Flask-Login` for a single admin user
-- [ ] Custom action: confirm / mark false positive, calling the **API** rather than
-      writing to the database directly — that keeps one path for writes and gives
-      the API a real consumer
+```
+browser ──HTML──> Flask panel ──HTTP + X-API-Key──> FastAPI ──> Postgres
+```
 
-Cut this if time is short. It is the least transferable phase.
+**The browser never talks to the API.** HTMX requests go to Flask, and Flask calls
+the API server-side. The API key lives only in the panel's environment — it never
+appears in a page, a cookie or a network request the browser can see.
+
+### What it does
+
+| Page | Uses | API today? |
+|---|---|---|
+| Players — filter by country/status, load more | `GET /v1/players` | yes |
+| Player — balance, transactions, bets in tabs | `/balance`, `/transactions`, `/bets` | yes |
+| Player — devices and IPs | `GET /v1/players/{id}/sessions` | **new** |
+| Player — linked accounts | `GET /v1/players/{id}/linked` | **new** |
+| Bets — every player, newest first, filter by status and stake | `GET /v1/bets` | **new** |
+| Bet — legs, match, settlement | `GET /v1/bets/{id}` | yes |
+| Events — upcoming, in kickoff order | `GET /v1/events?order=start_time` | **extended** |
+| Event — markets and prices | `GET /v1/events/{id}` | yes |
+
+Deliberately read-only. Running risk checks and a review queue are left for later.
+
+### API extensions (built first, in `api/`, with tests and Postman requests)
+
+- [x] **Scoped API keys, and a real 403.** `API_KEYS` keeps full access (read + create
+      risk checks); a new `API_READ_KEYS` is read-only. The panel gets a read key —
+      least privilege: a leaked panel key cannot create anything. A read key on
+      `POST /v1/risk-checks` is **403**, not 401: "I know who you are, and you may
+      not do this". Backward compatible — existing keys keep working.
+- [x] **`GET /v1/bets`** — bets across all players, filters `status`, `min_stake`,
+      `placed_after`. The admin view of "what is happening now".
+- [x] **`order=desc` on lists** — newest first. The cursor records which direction
+      it was made for, and a cursor used the wrong way round is a 400.
+- [ ] **`GET /v1/events?order=start_time`** — kickoff order. That breaks the simple
+      `id > cursor` rule: the cursor must carry `(start_time, id)` and the query
+      becomes a row comparison, `(start_time, id) > (%s, %s)`, with an index to match.
+- [ ] **`GET /v1/players/{id}/sessions`** — logins with IP, device and user agent.
+- [ ] **`GET /v1/players/{id}/linked`** — other players sharing a device or a payment
+      method, and which of the two they share. The API compares fingerprints
+      *server-side* and returns only the link — so the panel can investigate
+      multi-accounting without the fingerprint ever leaving the database.
+
+### How the panel is built
+
+- **Flask app factory** (`create_app()`), one blueprint per area.
+- **`api_client.py`** — one `httpx.Client` for the whole app (connection reuse, like
+  the API's pool), the key in its default headers, a timeout on every call. It turns
+  problem+json into an `ApiError(status, detail)` the views can act on:
+  API 404 → panel 404 page; API 401/403 → the panel is misconfigured, logged,
+  shown as a 500; API down or timing out → "API unavailable" with a retry.
+- **HTMX patterns**, each mapping onto something the API already does:
+  - *live filter*: the filter form re-requests the table body on change
+  - *load more*: the last row carries `next_cursor` and fetches the next page into
+    place — cursor pagination and HTMX fit each other exactly
+  - *lazy tabs*: a player's transactions and bets load when the tab is opened
+  - one URL, two answers: a normal request gets the full page, an `HX-Request`
+    gets only the fragment — every page still works with JavaScript off
+- **Login** with Flask-Login. Users come from `ADMIN_USERS` (usernames and password
+  hashes — the panel has no database). A `flask hash-password` command makes the
+  hashes. Session cookie `HttpOnly` and `SameSite=Lax`, `SECRET_KEY` from env.
+- **CSRF** protection on the POST forms (login, logout) with Flask-WTF.
+- **Money and time** are shown exactly as the API sends them: money strings are
+  never turned into floats, times are shown in UTC.
+- **HTMX and a small classless stylesheet are vendored** into `static/`, pinned — no
+  CDN, so the panel works offline and nothing third-party loads in an admin tool.
+
+### Layout
+
+```
+admin/
+  requirements.txt      flask, flask-login, flask-wtf, httpx, pytest
+  .env.example          API_URL, API_KEY (a read key), SECRET_KEY, ADMIN_USERS
+  app/
+    __init__.py         create_app()
+    config.py
+    api_client.py
+    auth.py             login, logout, hash-password
+    views/              players, bets, events
+    templates/          base, login, one folder per area, partials start with _
+    static/             htmx.min.js, the stylesheet, app.css
+  tests/
+```
+
+Run with `flask --app app run --port 5000 --debug` from `admin/`.
+
+### Build order — one step at a time, reviewed before the next
+
+- [x] 1. API: scoped keys and the 403
+- [x] 2. API: `GET /v1/bets` and `order=desc`
+- [ ] 3. API: events in kickoff order (the two-column cursor)
+- [ ] 4. API: `/players/{id}/sessions` and `/players/{id}/linked`
+- [ ] 5. Panel skeleton: app factory, config, API client, base template, error pages
+- [ ] 6. Login
+- [ ] 7. Players: list with filters and load-more, player page with tabs
+- [ ] 8. Bets and events pages
+- [ ] 9. Docs: `admin/README.md`, this section
+
+### Proof it works
+
+- **API extensions:** pytest and Postman requests, as in phase 6.
+- **Panel:** pytest with Flask's test client, and the API replaced by
+  `httpx.MockTransport` — so panel tests need no API running and no database. They
+  check: every page needs a login; a full page vs an HTMX fragment; load-more passes
+  the cursor on; an API 404 becomes a panel 404; an API outage becomes a friendly
+  page; **the API key never appears in any HTML the panel returns**.
+- **End to end:** API and panel running together over the real generated data.
 
 ---
 
@@ -249,7 +360,8 @@ services that need to talk to each other.
 - [ ] `postgres`, `generator` (live mode), `rules-runner`, `api`, `admin`,
       `grafana`, `prometheus`
 - [ ] One bridge network, Postgres on a named volume
-- [ ] Publish only the API, the admin panel and Grafana to the LAN
+- [ ] Publish only the API, the admin panel and Grafana to the LAN — the panel
+      needs the API on the internal network, never Postgres
 - [ ] Healthcheck on Postgres, `depends_on: condition: service_healthy` — a plain
       `depends_on` does not wait for the database to accept connections
 - [ ] Migrations applied by an entrypoint, not by hand
@@ -294,19 +406,34 @@ the instance down. Label by `rule_code` and `severity`, which are small fixed se
 
 ---
 
-## Phase 10 — CI
+## Phase 10 — CI/CD with GitHub Actions
 
-GitHub Actions on push:
+Workflows in `.github/workflows/`. Runs on every push and on every pull request to
+`main`; a red check blocks the merge.
 
-- [ ] `ruff`
-- [ ] `pytest` against a `postgres` service container
-- [ ] Apply migrations, run a short backfill (`DAYS=3`), then
+### CI — prove it works, on every push
+
+- [ ] **lint** — `ruff` over `generator/`, `api/`, `admin/`
+- [ ] **generator** — a `postgres` service container; apply every migration, run a
+      short backfill (`DAYS=3`), then
       `psql -v ON_ERROR_STOP=1 -f db/tests/invariants.sql` — it already raises on
       failure, so it needs no wrapper script
-- [ ] API tests against the same container
-- [ ] Build and push images
+- [ ] **api** — `pytest` in `api/` against its own `antifraud_test` in the service container
+- [ ] **admin** — `pytest` in `admin/`; needs no database or API, they are mocked
+- [ ] **end to end** — start the API on the backfilled database, then run the Postman
+      collection with Newman. Newman's non-zero exit on any failed check fails the job
 
-The backfill check is the honest version of "I know CI/CD": a test suite that runs a
+### CD — ship it, on `main` only
+
+- [ ] **build and push images** — one per service (generator, api, admin) to
+      `ghcr.io`, tagged with the commit SHA and `latest`. Needs the Dockerfiles from
+      phase 8, so this job comes after it
+- [ ] **deploy** — open question: the home server is not reachable from GitHub's
+      runners. Options: a self-hosted runner on the server pulling the new images, or
+      a scheduled `docker compose pull && up -d` on the server itself. Decide when
+      phase 8 is running
+
+The generator job is the honest version of "I know CI/CD": a pipeline that starts a
 real database, generates real data, and asserts something that can actually break.
 
 ---

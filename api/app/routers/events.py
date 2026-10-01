@@ -45,8 +45,8 @@ def list_events(
         # plain 422: the HTTPStatus name for it only exists from Python 3.13
         raise HTTPException(422, "`from` must be earlier than `to`.")
 
-    conditions = [sql.SQL("id > %(after_id)s")]
-    params: dict = {"after_id": page.after_id, "limit": page.limit + 1}
+    conditions = [page.after_cursor("id")]
+    params = page.params()
     if status is not None:
         conditions.append(sql.SQL("status = %(status)s"))
         params["status"] = status
@@ -63,8 +63,9 @@ def list_events(
         params["starts_to"] = starts_to
 
     query = sql.SQL(
-        "SELECT {columns} FROM events WHERE {where} ORDER BY id LIMIT %(limit)s"
-    ).format(columns=EVENT_COLUMNS, where=sql.SQL(" AND ").join(conditions))
+        "SELECT {columns} FROM events WHERE {where} ORDER BY {order} LIMIT %(limit)s"
+    ).format(columns=EVENT_COLUMNS, where=sql.SQL(" AND ").join(conditions),
+             order=page.order_by("id"))
 
     rows = conn.execute(query, params).fetchall()
     return build_page(rows, page, EventSummary.model_validate, EventPage)
