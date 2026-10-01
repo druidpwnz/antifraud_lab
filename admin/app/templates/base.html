@@ -1,0 +1,66 @@
+{#- Layout for every page. Beer CSS 5.0.3 (Material Design 3) and htmx 2.0.11, both
+    vendored in static/vendor - see the README there. No CDN, no inline scripts or
+    styles: the Content-Security-Policy in app/__init__.py forbids both. -#}
+{%- set nav = [
+    ("home.index", "dashboard", "Home"),
+] -%}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Antifraud Lab{% endblock %} · Admin</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/beercss/beer.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  {#- htmx settings, read by htmx itself:
+        includeIndicatorStyles false - htmx would otherwise inject a <style>, which the CSP blocks
+        allowEval false              - no eval; we never use hx-on or js: expressions
+        responseHandling             - swap 4xx/5xx too, so a failed fragment shows its
+                                       error card instead of silently doing nothing -#}
+  <meta name="htmx-config" content='{"includeIndicatorStyles": false, "allowEval": false,
+    "responseHandling": [{"code": "204", "swap": false}, {"code": "[23]..", "swap": true},
+                         {"code": "[45]..", "swap": true, "error": true}]}'>
+  <script src="{{ url_for('static', filename='vendor/htmx/htmx.min.js') }}" defer></script>
+</head>
+<body class="light">
+
+  {# large screens: a navigation drawer #}
+  <nav class="left max l">
+    <header>
+      <nav>
+        <i class="primary-text">shield_person</i>
+        <h6>Antifraud Lab</h6>
+      </nav>
+    </header>
+    {% for endpoint, icon, label in nav %}
+    <a href="{{ url_for(endpoint) }}" {% if request.endpoint == endpoint %}class="active"{% endif %}>
+      <i>{{ icon }}</i><span>{{ label }}</span>
+    </a>
+    {% endfor %}
+  </nav>
+
+  {# medium screens: a navigation rail #}
+  <nav class="left m">
+    <header><i class="primary-text">shield_person</i></header>
+    {% for endpoint, icon, label in nav %}
+    <a href="{{ url_for(endpoint) }}" {% if request.endpoint == endpoint %}class="active"{% endif %}>
+      <i>{{ icon }}</i><span>{{ label }}</span>
+    </a>
+    {% endfor %}
+  </nav>
+
+  {# phones: a bottom bar #}
+  <nav class="bottom s">
+    {% for endpoint, icon, label in nav %}
+    <a href="{{ url_for(endpoint) }}" {% if request.endpoint == endpoint %}class="active"{% endif %}>
+      <i>{{ icon }}</i>
+    </a>
+    {% endfor %}
+  </nav>
+
+  <main class="responsive">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

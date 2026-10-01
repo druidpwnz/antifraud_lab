@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Home{% endblock %}
+{% block content %}
+<header class="page-header">
+  <h4>Back office</h4>
+  <p class="secondary-text">Players, their money, bets and matches - read from the API.</p>
+</header>
+
+<div class="grid">
+  {# filled by /status as soon as the page loads, then every 30 seconds #}
+  <article class="s12 m6 round border" hx-get="{{ url_for('home.status') }}"
+           hx-trigger="load, every 30s" hx-swap="innerHTML">
+    <nav class="row">
+      <progress class="circle small"></progress>
+      <span>Checking the API...</span>
+    </nav>
+  </article>
+</div>
+{% endblock %}

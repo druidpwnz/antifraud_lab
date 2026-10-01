@@ -1,0 +1,55 @@
+/* The panel's own styles: only what Beer CSS does not cover. No inline styles
+   anywhere - the Content-Security-Policy forbids them - so they all live here. */
+
+/* The typeface. Beer CSS uses whatever "Inter" or "Roboto" the viewer happens to have
+   installed, so the panel looked different on every machine - and on one with only
+   Roboto Bold installed, every word was bold. So Roboto (Material's own typeface) is
+   vendored as a variable font, under a family name no installed font can have.
+   Three subsets; the browser downloads only the ones a page actually uses. */
+@font-face {
+  font-family: "Panel Roboto";
+  font-style: normal;
+  font-weight: 100 900;   /* one variable file covers every weight */
+  font-display: swap;
+  src: url("vendor/roboto/roboto-cyrillic-wght-normal.woff2") format("woff2");
+  unicode-range: U+0301,U+0400-045F,U+0490-0491,U+04B0-04B1,U+2116;
+}
+@font-face {
+  font-family: "Panel Roboto";
+  font-style: normal;
+  font-weight: 100 900;   /* one variable file covers every weight */
+  font-display: swap;
+  src: url("vendor/roboto/roboto-latin-ext-wght-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: "Panel Roboto";
+  font-style: normal;
+  font-weight: 100 900;   /* one variable file covers every weight */
+  font-display: swap;
+  src: url("vendor/roboto/roboto-latin-wght-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
+:root {
+  --font: "Panel Roboto", system-ui, sans-serif;
+}
+
+.page-header {
+  margin-block-end: 1.5rem;
+}
+
+.error-card {
+  max-width: 40rem;
+}
+
+/* htmx's loading indicators. htmx would inject these rules itself, as an inline
+   <style> the CSP blocks, so includeIndicatorStyles is off and they live here. */
+.htmx-indicator {
+  opacity: 0;
+  transition: opacity 200ms ease-in;
+}
+.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator {
+  opacity: 1;
+}

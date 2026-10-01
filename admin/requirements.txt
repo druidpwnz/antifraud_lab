@@ -1,0 +1,9 @@
+# Pinned to the minor versions this was built and tested with.
+flask==3.1.*
+flask-login==0.6.*
+flask-wtf==1.3.*
+httpx==0.28.*
+python-dotenv==1.2.*   # lets `flask run` read admin/.env by itself
+
+# tests
+pytest==9.1.*

@@ -1,0 +1,15 @@
+{#- The status card's contents, swapped in by htmx. Never an error page: it always
+    says something, even when everything is broken. -#}
+{%- set ok = reachable and key_ok -%}
+<nav class="row">
+  <i class="large {{ 'green-text' if ok else 'error-text' }}">{{ 'check_circle' if ok else 'error' }}</i>
+  <div class="max">
+    <h6 class="no-margin">API</h6>
+    {% if ok %}
+    <p class="no-margin">Reachable, and accepting the panel's key.</p>
+    {% else %}
+    <p class="no-margin">{{ message | capitalize }}.</p>
+    {% endif %}
+  </div>
+  <span class="chip {{ 'green' if ok else 'error' }}">{{ 'Online' if ok else 'Problem' }}</span>
+</nav>

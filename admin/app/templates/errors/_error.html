@@ -1,0 +1,15 @@
+{#- An error, as a card. Shown alone for an htmx request, inside error.html otherwise. -#}
+<article class="round border error-card">
+  <nav class="row">
+    <i class="extra error-text">{{ 'cloud_off' if status in (502, 503) else ('search_off' if status == 404 else 'error') }}</i>
+    <div class="max">
+      <h5 class="no-margin">{{ title }}</h5>
+      <p class="no-margin secondary-text">{{ status }}</p>
+    </div>
+  </nav>
+  <p>{{ message }}</p>
+  <nav class="row">
+    {% if retry %}<a class="button" href="{{ request.path }}"><i>refresh</i><span>Try again</span></a>{% endif %}
+    <a class="button border" href="{{ url_for('home.index') }}"><i>home</i><span>Home</span></a>
+  </nav>
+</article>

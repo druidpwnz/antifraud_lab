@@ -308,8 +308,16 @@ Deliberately read-only. Running risk checks and a review queue are left for late
 - **CSRF** protection on the POST forms (login, logout) with Flask-WTF.
 - **Money and time** are shown exactly as the API sends them: money strings are
   never turned into floats, times are shown in UTC.
-- **HTMX and a small classless stylesheet are vendored** into `static/`, pinned — no
-  CDN, so the panel works offline and nothing third-party loads in an admin tool.
+- **Material Design 3 through [Beer CSS](https://www.beercss.com)** — plain CSS classes,
+  no JavaScript build, made for server-rendered pages. Google's own Material Web was
+  ruled out: those are JavaScript web components that expect a bundler.
+- **htmx, Beer CSS, its icon font and Roboto are vendored** into `static/vendor/`,
+  pinned — no CDN, so the panel works offline and nothing third-party loads in an
+  admin tool. A strict Content-Security-Policy (`default-src 'self'`, no inline
+  scripts or styles, no eval) enforces it, and blocks the CDN fallback Beer CSS has
+  in its `@font-face` rules. Roboto is vendored because Beer CSS otherwise uses
+  whatever font the viewer has installed — on a machine with only Roboto Bold, every
+  word on the page came out bold.
 
 ### Layout
 
@@ -324,7 +332,7 @@ admin/
     auth.py             login, logout, hash-password
     views/              players, bets, events
     templates/          base, login, one folder per area, partials start with _
-    static/             htmx.min.js, the stylesheet, app.css
+    static/             vendor/ (htmx, Beer CSS, Roboto - see its README), app.css
   tests/
 ```
 
@@ -336,7 +344,7 @@ Run with `flask --app app run --port 5000 --debug` from `admin/`.
 - [x] 2. API: `GET /v1/bets` and `order=desc`
 - [x] 3. API: events in kickoff order (the two-column cursor)
 - [x] 4. API: `/players/{id}/sessions` and `/players/{id}/linked`
-- [ ] 5. Panel skeleton: app factory, config, API client, base template, error pages
+- [x] 5. Panel skeleton: app factory, config, API client, base template, error pages
 - [ ] 6. Login
 - [ ] 7. Players: list with filters and load-more, player page with tabs
 - [ ] 8. Bets and events pages
