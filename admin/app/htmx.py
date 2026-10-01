@@ -9,7 +9,14 @@ from flask import render_template, request
 
 
 def is_htmx() -> bool:
-    return request.headers.get("HX-Request") == "true"
+    """True when htmx wants a fragment.
+
+    One exception: going Back to a page htmx no longer has in its history cache. htmx
+    then re-asks the URL with HX-History-Restore-Request and replaces the whole body
+    with the answer, so that answer must be the full page.
+    """
+    return (request.headers.get("HX-Request") == "true"
+            and request.headers.get("HX-History-Restore-Request") != "true")
 
 
 def render(page: str, fragment: str, **context) -> str:

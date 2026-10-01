@@ -1,0 +1,21 @@
+{#- The tab bar and the active tab's table. Sent alone when a tab is clicked, so the
+    server decides which tab is highlighted - no JavaScript needed for that. Each tab
+    is a real link too: it works without htmx, and htmx pushes it into the address
+    bar, so the back button and bookmarks land on the right tab. -#}
+<div class="tabs left-align">
+  {% for key, info in tabs.items() %}
+  {%- set url = url_for('players.show', player_id=player_id, tab=key) -%}
+  <a href="{{ url }}" hx-get="{{ url }}" hx-target="#tabs" hx-push-url="true"
+     {% if key == tab %}class="active"{% endif %}>
+    <i>{{ info.icon }}</i><span>{{ info.label }}</span>
+  </a>
+  {% endfor %}
+</div>
+<article class="round border no-padding table-card">
+  <table class="border">
+    <thead><tr>{% for column in tab_info.columns %}<th>{{ column }}</th>{% endfor %}</tr></thead>
+    <tbody>
+      {% include "players/_tab_rows.html" %}
+    </tbody>
+  </table>
+</article>

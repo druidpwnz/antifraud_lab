@@ -1,0 +1,12 @@
+{% for t in rows %}
+<tr>
+  <td title="{{ t.direction }}">
+    <i class="{{ 'green-text' if t.direction == 'deposit' else 'secondary-text' }}">{{ 'south_west' if t.direction == 'deposit' else 'north_east' }}</i>
+  </td>
+  <td class="nowrap">{{ t.amount | money(t.currency) }}</td>
+  <td><span class="chip small tone-{{ t.status | status_colour }}">{{ t.status }}</span></td>
+  <td class="nowrap">{{ t.method.type }}{% if t.method.last4 %} ···· {{ t.method.last4 }}{% endif %}</td>
+  <td class="nowrap">{{ t.created_at | when }}</td>
+  <td class="nowrap">{{ t.processed_at | when }}</td>
+</tr>
+{% endfor %}

@@ -1,0 +1,16 @@
+{#- Rows of the players table, and the "load more" row after them. Sent alone when the
+    filters change (swapped into the table body) and for "load more" (swapped in place
+    of the old load-more row). -#}
+{% for p in players %}
+<tr>
+  <td><a class="link" href="{{ url_for('players.show', player_id=p.id) }}">#{{ p.id }}</a></td>
+  <td>{{ p.country }}</td>
+  <td>{{ p.currency }}</td>
+  <td><span class="chip small tone-{{ p.status | status_colour }}">{{ p.status | humanise }}</span></td>
+  <td>{{ p.registered_at | when }}</td>
+</tr>
+{% endfor %}
+{% if not players and not cursor %}
+<tr><td colspan="5" class="center-align secondary-text">No players match these filters.</td></tr>
+{% endif %}
+{% include "_load_more.html" %}

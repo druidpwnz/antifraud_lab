@@ -1,0 +1,9 @@
+{% for s in rows %}
+<tr>
+  <td class="nowrap">{{ s.started_at | when }}</td>
+  <td class="nowrap">{{ s.ended_at | when }}</td>
+  <td><code>{{ s.ip }}</code></td>
+  <td><code title="{{ s.device_id }}">{{ s.device_id[:8] }}…</code></td>
+  <td class="truncate" title="{{ s.user_agent or '' }}">{{ s.user_agent or '-' }}</td>
+</tr>
+{% endfor %}

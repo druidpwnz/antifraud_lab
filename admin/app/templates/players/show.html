@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Player #{{ player.id }}{% endblock %}
+{% block content %}
+<a class="back-link link" href="{{ url_for('players.index') }}"><i>arrow_back</i><span>Players</span></a>
+<div class="page-header">
+  <nav class="row wrap">
+    <h4 class="no-margin">Player #{{ player.id }}</h4>
+    <span class="chip small tone-{{ player.status | status_colour }}">{{ player.status | humanise }}</span>
+    <span class="chip small border">{{ player.country }}</span>
+    <span class="chip small border">{{ player.currency }}</span>
+  </nav>
+  <p class="no-margin secondary-text">Registered {{ player.registered_at | when }}</p>
+</div>
+
+<div class="grid balance">
+  <article class="s12 m4 round primary-container">
+    <p class="no-margin">Balance</p>
+    <h5 class="no-margin">{{ balance.balance | money(balance.currency) }}</h5>
+  </article>
+  <article class="s6 m2 round border">
+    <p class="no-margin secondary-text">Deposited</p>
+    <h6 class="no-margin">{{ balance.deposited | money }}</h6>
+  </article>
+  <article class="s6 m2 round border">
+    <p class="no-margin secondary-text">Withdrawn</p>
+    <h6 class="no-margin">{{ balance.withdrawn | money }}</h6>
+  </article>
+  <article class="s6 m2 round border">
+    <p class="no-margin secondary-text">Staked</p>
+    <h6 class="no-margin">{{ balance.staked | money }}</h6>
+  </article>
+  <article class="s6 m2 round border">
+    <p class="no-margin secondary-text">Paid out</p>
+    <h6 class="no-margin">{{ balance.paid_out | money }}</h6>
+  </article>
+</div>
+
+<div id="tabs">
+  {% include "players/_tabs.html" %}
+</div>
+{% endblock %}

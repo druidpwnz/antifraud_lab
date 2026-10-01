@@ -17,8 +17,9 @@ from werkzeug.exceptions import HTTPException
 from app import config as config_module
 from app.api_client import ApiClient, ApiError, ApiUnavailable
 from app.htmx import render
+from app import formatting
 from app.auth import init_auth
-from app.views import home
+from app.views import home, players
 
 log = logging.getLogger(__name__)
 
@@ -50,13 +51,24 @@ def create_app(overrides: dict | None = None, transport=None) -> Flask:
 
     init_auth(app)                  # every page needs a login from here on
     app.register_blueprint(home.bp)
+    app.register_blueprint(players.bp)
     register_error_pages(app)
+
+    app.jinja_env.filters.update(
+        money=formatting.money,
+        when=formatting.when,
+        status_colour=formatting.status_colour,
+        humanise=formatting.humanise,
+    )
 
     @app.after_request
     def security_headers(response):
         response.headers["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "same-origin"
+        # The same URL answers with a page or a fragment depending on HX-Request. Vary
+        # tells any cache - the browser's included - to keep the two apart.
+        response.vary.add("HX-Request")
         return response
 
     return app
@@ -92,7 +104,8 @@ def register_error_pages(app: Flask) -> None:
 
     @app.errorhandler(HTTPException)
     def http_error(exc: HTTPException):
-        return page(exc.code or 500, exc.name, exc.description or "")
+        # Werkzeug names are Title Case ("Not Found"); the panel writes sentence case
+        return page(exc.code or 500, exc.name.capitalize(), exc.description or "")
 
     @app.errorhandler(Exception)
     def unexpected(exc):

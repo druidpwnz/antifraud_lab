@@ -67,3 +67,58 @@
 nav .logout button {
   width: 100%;
 }
+
+/* tables sit in a card, and scroll sideways on a phone instead of squashing */
+.table-card {
+  overflow-x: auto;
+}
+.nowrap {
+  white-space: nowrap;
+}
+.truncate {
+  max-width: 22rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.filters,
+.balance {
+  margin-block-end: 1rem;
+}
+/* Beer CSS gives any element whose child has a "no-margin" class 0.1px of padding
+   (a margin-collapse trick), and that rule outranks article's own 1rem. Put it back. */
+.balance > article {
+  padding: 1rem;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-block-end: 0.5rem;
+}
+
+/* on a phone the tab bar scrolls sideways instead of cutting the last tab off */
+.tabs {
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+/* The load-more row spans a table that may scroll sideways on a phone. Sticky keeps
+   the button in view at the left edge, wherever the table is scrolled to. */
+.load-more-cell button {
+  position: sticky;
+  inset-inline-start: 0.5rem;
+}
+
+/* Status chips: tonal, the Material 3 way - a light container and dark text of the
+   same hue - instead of Beer's saturated colours, which put dark text on mid-green.
+   The names are what formatting.status_colour returns. */
+.chip.tone-green       { background-color: #c8e6c9; color: #1b5e20; }
+.chip.tone-amber       { background-color: #ffecb3; color: #7a4f01; }
+.chip.tone-red         { background-color: #ffcdd2; color: #8e1c1c; }
+.chip.tone-blue        { background-color: #bbdefb; color: #0d47a1; }
+.chip.tone-teal        { background-color: #b2dfdb; color: #004d40; }
+.chip.tone-deep-orange { background-color: #ffccbc; color: #8a2c0d; }
+.chip.tone-grey        { background-color: #e0e0e0; color: #424242; }
+.chip[class*="tone-"]  { border: none; }

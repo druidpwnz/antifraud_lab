@@ -1,0 +1,10 @@
+{% for b in rows %}
+<tr>
+  <td>#{{ b.id }}</td>
+  <td class="nowrap">{{ b.placed_at | when }}</td>
+  <td class="nowrap">{{ b.stake | money(b.currency) }}</td>
+  <td>{{ b.total_odds }}</td>
+  <td><span class="chip small tone-{{ b.status | status_colour }}">{{ b.status | humanise }}</span></td>
+  <td class="nowrap">{{ b.payout | money(b.currency) if b.payout is not none else '-' }}</td>
+</tr>
+{% endfor %}

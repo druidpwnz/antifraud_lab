@@ -1,0 +1,14 @@
+{#- The last row of any paged table. The button fetches the next page and puts it -
+    its rows and a new load-more row - exactly where this row is. When there is no
+    next page, there is no row. -#}
+{% if more_url %}
+<tr id="load-more-row">
+  <td colspan="99" class="load-more-cell">
+    <button class="border" hx-get="{{ more_url }}" hx-target="#load-more-row" hx-swap="outerHTML"
+            hx-indicator="#load-more-row">
+      <i>expand_more</i><span>Load more</span>
+      <progress class="circle small htmx-indicator"></progress>
+    </button>
+  </td>
+</tr>
+{% endif %}

@@ -346,7 +346,7 @@ Run with `flask --app app run --port 5000 --debug` from `admin/`.
 - [x] 4. API: `/players/{id}/sessions` and `/players/{id}/linked`
 - [x] 5. Panel skeleton: app factory, config, API client, base template, error pages
 - [x] 6. Login
-- [ ] 7. Players: list with filters and load-more, player page with tabs
+- [x] 7. Players: list with filters and load-more, player page with tabs
 - [ ] 8. Bets and events pages
 - [ ] 9. Docs: `admin/README.md`, this section
 

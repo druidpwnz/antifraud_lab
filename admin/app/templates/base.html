@@ -3,7 +3,10 @@
     styles: the Content-Security-Policy in app/__init__.py forbids both. -#}
 {%- set nav = [
     ("home.index", "dashboard", "Home"),
+    ("players.index", "group", "Players"),
 ] -%}
+{#- a section stays highlighted on its sub-pages too: /players/5 lights up "Players" -#}
+{%- set section = (request.endpoint or "").split(".")[0] -%}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -35,7 +38,7 @@
       </nav>
     </header>
     {% for endpoint, icon, label in nav %}
-    <a href="{{ url_for(endpoint) }}" {% if request.endpoint == endpoint %}class="active"{% endif %}>
+    <a href="{{ url_for(endpoint) }}" {% if section == endpoint.split(".")[0] %}class="active"{% endif %}>
       <i>{{ icon }}</i><span>{{ label }}</span>
     </a>
     {% endfor %}
@@ -48,7 +51,7 @@
   <nav class="left m">
     <header><i class="primary-text">shield_person</i></header>
     {% for endpoint, icon, label in nav %}
-    <a href="{{ url_for(endpoint) }}" {% if request.endpoint == endpoint %}class="active"{% endif %}>
+    <a href="{{ url_for(endpoint) }}" {% if section == endpoint.split(".")[0] %}class="active"{% endif %}>
       <i>{{ icon }}</i><span>{{ label }}</span>
     </a>
     {% endfor %}
@@ -59,7 +62,7 @@
   {# phones: a bottom bar #}
   <nav class="bottom s">
     {% for endpoint, icon, label in nav %}
-    <a href="{{ url_for(endpoint) }}" {% if request.endpoint == endpoint %}class="active"{% endif %}>
+    <a href="{{ url_for(endpoint) }}" {% if section == endpoint.split(".")[0] %}class="active"{% endif %}>
       <i>{{ icon }}</i>
     </a>
     {% endfor %}

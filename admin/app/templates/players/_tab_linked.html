@@ -1,0 +1,10 @@
+{% for p in rows %}
+<tr>
+  <td><a class="link" href="{{ url_for('players.show', player_id=p.id) }}">#{{ p.id }}</a></td>
+  <td>{{ p.country }}</td>
+  <td><span class="chip small tone-{{ p.status | status_colour }}">{{ p.status | humanise }}</span></td>
+  <td>{% if p.shared_devices %}<i class="small">devices</i> {{ p.shared_devices }}{% else %}-{% endif %}</td>
+  <td>{% if p.shared_payment_methods %}<i class="small">credit_card</i> {{ p.shared_payment_methods }}{% else %}-{% endif %}</td>
+  <td class="nowrap">{{ p.registered_at | when }}</td>
+</tr>
+{% endfor %}

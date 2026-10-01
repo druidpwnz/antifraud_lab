@@ -114,7 +114,7 @@ def test_unknown_panel_url_is_a_404_page(make_client):
     response = make_client().get("/no/such/page")
 
     assert response.status_code == 404
-    assert "Not Found" in response.get_data(as_text=True)
+    assert "Not found" in response.get_data(as_text=True)
 
 
 # ------------------------------------------------------------------- security

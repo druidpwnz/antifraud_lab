@@ -1,0 +1,6 @@
+{#- One page of the active tab's rows, then the load-more row. -#}
+{% include "players/_tab_" ~ tab ~ ".html" %}
+{% if not rows and not cursor %}
+<tr><td colspan="{{ tab_info.columns | length }}" class="center-align secondary-text">{{ tab_info.empty }}</td></tr>
+{% endif %}
+{% include "_load_more.html" %}
