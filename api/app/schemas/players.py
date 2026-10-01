@@ -38,3 +38,38 @@ class Balance(BaseModel):
     )
     staked: Money = Field(description="Every stake, settled or not.")
     paid_out: Money = Field(description="Every settlement payout.")
+
+
+class Session(BaseModel):
+    """One login: when, from where, on what."""
+
+    id: int
+    started_at: datetime
+    ended_at: datetime | None = Field(description="null while the session is open.")
+    ip: str = Field(examples=["203.0.113.42"])
+    device_id: str = Field(examples=["5e6d9db3-2217-4f70-b646-9a1f5f7402f2"])
+    user_agent: str | None
+
+
+class SessionPage(Page[Session]):
+    """A page of sessions."""
+
+
+class LinkedPlayer(BaseModel):
+    """Another player who shares something with this one - and only how much.
+
+    The device ids and card fingerprints that connect them are compared inside the
+    database and never returned: the API answers "these two share a card" without
+    handing out the card's fingerprint.
+    """
+
+    id: int
+    country: str
+    status: PlayerStatus
+    registered_at: datetime
+    shared_devices: int = Field(description="How many devices both have logged in from.")
+    shared_payment_methods: int = Field(description="How many payment methods both use.")
+
+
+class LinkedPlayerPage(Page[LinkedPlayer]):
+    """A page of linked players."""

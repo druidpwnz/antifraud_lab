@@ -74,7 +74,7 @@ def bet_summary_page(
     twice - and a duplicated row breaks cursor pagination. The generator never
     settles twice (invariants.sql checks it), but the API should not depend on that.
     """
-    where = sql.SQL(" AND ").join([*conditions, page.after_cursor("b", "id")])
+    where = sql.SQL(" AND ").join([*conditions, page.after_cursor("b")])
     query = sql.SQL(
         """
         SELECT b.id, b.player_id, b.placed_at, b.stake, b.currency, b.total_odds,
@@ -90,7 +90,7 @@ def bet_summary_page(
         ORDER BY {order}
         LIMIT %(limit)s
         """
-    ).format(where=where, order=page.order_by("b", "id"))
+    ).format(where=where, order=page.order_by("b"))
 
     rows = conn.execute(query, {**params, **page.params()}).fetchall()
     return build_page(rows, page, BetSummary.model_validate, BetSummaryPage)

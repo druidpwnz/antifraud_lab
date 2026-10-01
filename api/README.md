@@ -18,8 +18,9 @@ From the repo root, once:
 source .venv/bin/activate
 pip install -r api/requirements.txt
 
-# an existing database: apply the migration, keep the data
+# an existing database: apply the migrations it does not have yet, keep the data
 psql antifraud -v ON_ERROR_STOP=1 --single-transaction -f db/migrations/003_risk_checks.sql
+psql antifraud -v ON_ERROR_STOP=1 --single-transaction -f db/migrations/004_events_kickoff_order.sql
 # (a fresh one: bash reset.sh && python generator/backfill.py - reset.sh DROPS the database)
 
 cp api/.env.example api/.env        # DATABASE_URL, API_KEYS, API_READ_KEYS, POOL_MIN, POOL_MAX
@@ -41,7 +42,7 @@ uvicorn app.main:app --reload --env-file .env
 
 ```bash
 bash reset.sh antifraud_test        # once, and again after a new migration
-cd api && pytest -q                 # 120 tests
+cd api && pytest -q                 # 140 tests
 ```
 
 - Tests run against **`antifraud_test`**, never `antifraud`. The fixture wipes it and
@@ -78,9 +79,11 @@ Every error, of any kind, is
 | GET | `/v1/players/{id}/balance` | — | 200 | 401 404 422 |
 | GET | `/v1/players/{id}/transactions` | `limit` `cursor` `order` `direction` `status` `since` | 200 page | 400 401 404 422 |
 | GET | `/v1/players/{id}/bets` | `limit` `cursor` `order` `status` | 200 page | 400 401 404 422 |
+| GET | `/v1/players/{id}/sessions` | `limit` `cursor` `order` | 200 page | 400 401 404 422 |
+| GET | `/v1/players/{id}/linked` | `limit` `cursor` `order` | 200 page | 400 401 404 422 |
 | GET | `/v1/bets` | `limit` `cursor` `order` `status` `min_stake` `placed_after` | 200 page | 400 401 422 |
 | GET | `/v1/bets/{id}` | — | 200 | 401 404 422 |
-| GET | `/v1/events` | `limit` `cursor` `order` `status` `league` `from` `to` | 200 page | 400 401 422 |
+| GET | `/v1/events` | `limit` `cursor` `order` `sort` `status` `league` `from` `to` | 200 page | 400 401 422 |
 | GET | `/v1/events/{id}` | — | 200 | 401 404 422 |
 | POST | `/v1/risk-checks` | header `Idempotency-Key`; body below | 201 new, 200 replay | 401 **403** 404 422 503 |
 
@@ -95,11 +98,18 @@ What each one returns:
 - **`/v1/players/{id}/transactions`** — each with its payment method nested (`type`,
   `last4`). The card **fingerprint is never sent**: it is what links accounts.
 - **`/v1/players/{id}/bets`** — each with `payout` and `settled_at`, `null` while open.
+- **`/v1/players/{id}/sessions`** — every login: `started_at`, `ended_at`, `ip`, `device_id`, `user_agent`.
+- **`/v1/players/{id}/linked`** — other players who share a device or a payment method
+  with this one, and how many of each. The device ids and card fingerprints are
+  compared inside the database and never returned: the API says *that* two players
+  share a card, never *which* card.
 - **`/v1/bets`** — the same, across every player, each bet carrying its `player_id`.
   The back-office feed: usually asked for with `order=desc`.
 - **`/v1/bets/{id}`** — every leg with its market and match, `odds_at_placement`
   (the price that counts, not today's), and the settlement or `null`.
 - **`/v1/events`** — `from` inclusive, `to` exclusive; `from` must be before `to`.
+  `sort=start_time` lists matches in kickoff order — with `status=scheduled` and
+  `from`, that is "upcoming matches, soonest first".
 - **`/v1/events/{id}`** — every market, each with its selections and `current_odds`.
 - An **unknown player** is 404 on every `/players/{id}/…` endpoint — never an empty 200.
 
@@ -116,6 +126,12 @@ id 4812" means opposite things in the two directions. One difference worth knowi
 paging oldest first, rows created meanwhile turn up on a later page; paging newest
 first, they never appear, because they are above where you started — start again
 from the top to see them.
+
+`/v1/events` also takes `sort=start_time`. Kickoff times repeat — about ten matches
+share each one on a given day — so the id breaks ties and the cursor carries both:
+the next page starts at `(start_time, id) > (last kickoff, last id)`, a row
+comparison, and never skips a match that shares the last one's kickoff. A cursor
+belongs to one sort as well as one order; using it with another is a 400.
 
 **Money** is a string with exactly two decimals: `"105.00"`, `"0.00"`. Odds and
 market lines are strings too (`"2.250"`, `"2.50"`). Never parse them into floats.
@@ -184,7 +200,7 @@ hard rule is a decline with score 100, and all of them are reported, not just th
 
 ## Postman
 
-`postman/antifraud.postman_collection.json` — 30 requests in five folders, 47 checks.
+`postman/antifraud.postman_collection.json` — 36 requests in six folders, 60 checks.
 `postman/local.postman_environment.json` — `baseUrl`, and `apiKey` and `readApiKey` left empty.
 
 ### Setup
@@ -197,6 +213,11 @@ hard rule is a decline with score 100, and all of them are reported, not just th
 
 The collection holds the API key on its **Authorization** tab and every request
 inherits it. `health` requests use **No Auth**, and *Wrong API key – 401* sets its own.
+
+Two collection variables pick the players: `playerId` (default 1) for the player
+pages, and `linkedPlayerId` (default 5, a player who shares a device on the seeded
+dataset) for *investigation*. *Linked players* fails on purpose if that player has
+no links — an empty list would pass every other check without testing anything.
 
 Requests pass values along: *first page* saves the cursor *next page* uses;
 *player money → Bets* picks the bet *Bet detail* opens; *Events – scheduled* picks
@@ -250,11 +271,11 @@ api/
     db.py              connection pool and the get_conn dependency
     auth.py            X-API-Key check, the two kinds of key, 401 vs 403
     errors.py          problem+json for every failure
-    pagination.py      opaque cursors, asc/desc, limit + 1 paging - routers never write id > ... themselves
+    pagination.py      opaque cursors, asc/desc, sort by id or kickoff, limit + 1 paging
     ledger.py          a player's balance - shared by /balance and the risk rules
     scoring.py         the risk rules, pure functions
     schemas/           request and response models
     routers/           health, players, bets, events, risk_checks
-  tests/               120 tests against antifraud_test
+  tests/               140 tests against antifraud_test
   postman/             collection and environment
 ```

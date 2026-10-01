@@ -18,7 +18,16 @@ from app.db import get_conn
 from app.pagination import PageParams, build_page
 from app.routers.bets import bet_summary_page
 from app.schemas.bets import BetStatus, BetSummaryPage
-from app.schemas.players import Balance, Player, PlayerPage, PlayerStatus
+from app.schemas.players import (
+    Balance,
+    LinkedPlayer,
+    LinkedPlayerPage,
+    Player,
+    PlayerPage,
+    PlayerStatus,
+    Session,
+    SessionPage,
+)
 from app.schemas.transactions import PaymentMethod, Transaction, TransactionPage
 
 router = APIRouter(prefix="/players", tags=["players"])
@@ -44,7 +53,7 @@ def list_players(
     # Built from fixed SQL fragments with psycopg.sql - never from the caller's input.
     # Every value goes in as a parameter, so this is not the f-string-in-SQL mistake
     # even though the WHERE clause is assembled at runtime.
-    conditions = [page.after_cursor("id")]
+    conditions = [page.after_cursor()]
     params = page.params()
 
     if country is not None:
@@ -60,7 +69,7 @@ def list_players(
     query = sql.SQL(
         "SELECT {columns} FROM players WHERE {where} ORDER BY {order} LIMIT %(limit)s"
     ).format(columns=PLAYER_COLUMNS, where=sql.SQL(" AND ").join(conditions),
-             order=page.order_by("id"))
+             order=page.order_by())
 
     rows = conn.execute(query, params).fetchall()
     return build_page(rows, page, Player.model_validate, PlayerPage)
@@ -126,7 +135,7 @@ def list_transactions(
 ) -> TransactionPage:
     load_player(conn, player_id)
 
-    conditions = [sql.SQL("t.player_id = %(player_id)s"), page.after_cursor("t", "id")]
+    conditions = [sql.SQL("t.player_id = %(player_id)s"), page.after_cursor("t")]
     params = {**page.params(), "player_id": player_id}
     if direction is not None:
         conditions.append(sql.SQL("t.direction = %(direction)s"))
@@ -148,7 +157,7 @@ def list_transactions(
         ORDER BY {order}
         LIMIT %(limit)s
         """
-    ).format(where=sql.SQL(" AND ").join(conditions), order=page.order_by("t", "id"))
+    ).format(where=sql.SQL(" AND ").join(conditions), order=page.order_by("t"))
 
     rows = conn.execute(query, params).fetchall()
     return build_page(rows, page, transaction_from_row, TransactionPage)
@@ -183,3 +192,89 @@ def list_bets(
         params["status"] = status
 
     return bet_summary_page(conn, page, conditions, params)
+
+
+@router.get(
+    "/{player_id}/sessions",
+    summary="A player's logins: when, from which IP, on which device",
+    response_model=SessionPage,
+    responses=errors.responses(400, 404),
+)
+def list_sessions(
+    player_id: int = Path(gt=0),
+    page: PageParams = Depends(),
+    conn: psycopg.Connection = Depends(get_conn),
+) -> SessionPage:
+    load_player(conn, player_id)
+
+    query = sql.SQL(
+        """
+        SELECT id, started_at, ended_at, host(ip) AS ip, device_id::text AS device_id, user_agent
+        FROM sessions
+        WHERE player_id = %(player_id)s AND {after}
+        ORDER BY {order}
+        LIMIT %(limit)s
+        """
+    ).format(after=page.after_cursor(), order=page.order_by())
+
+    rows = conn.execute(query, {**page.params(), "player_id": player_id}).fetchall()
+    return build_page(rows, page, Session.model_validate, SessionPage)
+
+
+@router.get(
+    "/{player_id}/linked",
+    summary="Other players sharing a device or a payment method with this one",
+    description="For multi-accounting investigations. Says WHO is linked and HOW MANY "
+    "devices and payment methods they share - never the device ids or card "
+    "fingerprints themselves, which are compared inside the database.",
+    response_model=LinkedPlayerPage,
+    responses=errors.responses(400, 404),
+)
+def list_linked(
+    player_id: int = Path(gt=0),
+    page: PageParams = Depends(),
+    conn: psycopg.Connection = Depends(get_conn),
+) -> LinkedPlayerPage:
+    load_player(conn, player_id)
+
+    # Two kinds of link, gathered into one list, then counted per other player.
+    # Both halves are joins on an indexed column - sessions(device_id) and
+    # payment_methods(fingerprint) - so this is cheap however big the tables get.
+    #
+    # UNION, not UNION ALL: it removes duplicate (player, kind, value) rows, so ten
+    # sessions on one shared device count as one shared device, not ten. (That also
+    # makes the DISTINCTs in the two CTEs unnecessary for correctness - they only
+    # shrink what gets joined.)
+    query = sql.SQL(
+        """
+        WITH my_devices AS (
+            SELECT DISTINCT device_id FROM sessions WHERE player_id = %(player_id)s
+        ),
+        my_methods AS (
+            SELECT DISTINCT fingerprint FROM payment_methods WHERE player_id = %(player_id)s
+        ),
+        links AS (
+            SELECT s.player_id AS other_id, 'device' AS kind, s.device_id::text AS shared
+            FROM sessions s
+            JOIN my_devices d ON d.device_id = s.device_id
+            WHERE s.player_id <> %(player_id)s
+          UNION
+            SELECT pm.player_id, 'payment_method', pm.fingerprint
+            FROM payment_methods pm
+            JOIN my_methods m ON m.fingerprint = pm.fingerprint
+            WHERE pm.player_id <> %(player_id)s
+        )
+        SELECT p.id, p.country, p.status, p.registered_at,
+               count(*) FILTER (WHERE l.kind = 'device')         AS shared_devices,
+               count(*) FILTER (WHERE l.kind = 'payment_method') AS shared_payment_methods
+        FROM links l
+        JOIN players p ON p.id = l.other_id
+        WHERE {after}
+        GROUP BY p.id, p.country, p.status, p.registered_at
+        ORDER BY {order}
+        LIMIT %(limit)s
+        """
+    ).format(after=page.after_cursor("p"), order=page.order_by("p"))
+
+    rows = conn.execute(query, {**page.params(), "player_id": player_id}).fetchall()
+    return build_page(rows, page, LinkedPlayer.model_validate, LinkedPlayerPage)

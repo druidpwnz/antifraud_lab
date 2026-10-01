@@ -31,11 +31,27 @@
       "value": "1"
     },
     {
+      "key": "linkedPlayerId",
+      "value": "5"
+    },
+    {
+      "key": "otherSideId",
+      "value": ""
+    },
+    {
       "key": "nextCursor",
       "value": ""
     },
     {
       "key": "descCursor",
+      "value": ""
+    },
+    {
+      "key": "kickoffCursor",
+      "value": ""
+    },
+    {
+      "key": "lastKickoff",
       "value": ""
     },
     {
@@ -805,6 +821,171 @@
       ]
     },
     {
+      "name": "investigation",
+      "item": [
+        {
+          "name": "Sessions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "const isPage = pm.response.code === 200 && Array.isArray(body.items);",
+                  "",
+                  "pm.test(\"200 with a page of results\", function () {",
+                  "    pm.expect(pm.response.code, `got ${pm.response.code}: ${body.detail || body.title || \"\"}`).to.equal(200);",
+                  "    pm.expect(body.items, \"response has no items\").to.be.an(\"array\");",
+                  "});",
+                  "",
+                  "if (isPage) {",
+                  "    pm.test(\"each login has a plain IP, a device and a sensible end\", function () {",
+                  "        body.items.forEach((s) => {",
+                  "            pm.expect(s.ip, `session ${s.id}`).to.not.include(\"/\");",
+                  "            pm.expect(s.device_id, `session ${s.id}`).to.match(/^[0-9a-f-]{36}$/);",
+                  "            if (s.ended_at !== null) {",
+                  "                pm.expect(Date.parse(s.ended_at), `session ${s.id}`).to.be.above(Date.parse(s.started_at));",
+                  "            }",
+                  "        });",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/players/{{playerId}}/sessions?order=desc&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "players",
+                "{{playerId}}",
+                "sessions"
+              ],
+              "query": [
+                {
+                  "key": "order",
+                  "value": "desc"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Linked players",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "const isPage = pm.response.code === 200 && Array.isArray(body.items);",
+                  "",
+                  "pm.test(\"200 with a page of results\", function () {",
+                  "    pm.expect(pm.response.code, `got ${pm.response.code}: ${body.detail || body.title || \"\"}`).to.equal(200);",
+                  "    pm.expect(body.items, \"response has no items\").to.be.an(\"array\");",
+                  "});",
+                  "",
+                  "if (isPage) {",
+                  "    pm.test(\"this player really has links - otherwise nothing below is tested\", function () {",
+                  "        pm.expect(body.items, \"no linked players: set linkedPlayerId to a player who shares a device or card\")",
+                  "            .to.not.be.empty;",
+                  "    });",
+                  "",
+                  "    pm.test(\"each link shares something, and is never the player themselves\", function () {",
+                  "        body.items.forEach((p) => {",
+                  "            pm.expect(p.shared_devices + p.shared_payment_methods, `player ${p.id}`).to.be.at.least(1);",
+                  "            pm.expect(p.id).to.not.equal(Number(pm.collectionVariables.get(\"linkedPlayerId\")));",
+                  "        });",
+                  "    });",
+                  "",
+                  "    pm.test(\"the evidence never leaves the API: no fingerprints, no device ids\", function () {",
+                  "        pm.expect(pm.response.text()).to.not.include(\"fingerprint\");",
+                  "        pm.expect(pm.response.text()).to.not.include(\"device_id\");",
+                  "    });",
+                  "",
+                  "    if (body.items.length) pm.collectionVariables.set(\"otherSideId\", body.items[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/players/{{linkedPlayerId}}/linked",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "players",
+                "{{linkedPlayerId}}",
+                "linked"
+              ]
+            },
+            "description": "linkedPlayerId is 5 by default: on the seeded dataset player 5 shares a device with another player. Change it in the collection's Variables tab if your data differs."
+          }
+        },
+        {
+          "name": "Linked players - the other side",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "const isPage = pm.response.code === 200 && Array.isArray(body.items);",
+                  "",
+                  "pm.test(\"200 with a page of results\", function () {",
+                  "    pm.expect(pm.response.code, `got ${pm.response.code}: ${body.detail || body.title || \"\"}`).to.equal(200);",
+                  "    pm.expect(body.items, \"response has no items\").to.be.an(\"array\");",
+                  "});",
+                  "",
+                  "if (isPage) {",
+                  "    pm.test(\"a link works both ways: the other player is linked back\", function () {",
+                  "        const back = body.items.map((p) => p.id);",
+                  "        pm.expect(back).to.include(Number(pm.collectionVariables.get(\"linkedPlayerId\")));",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/players/{{otherSideId}}/linked",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "players",
+                "{{otherSideId}}",
+                "linked"
+              ]
+            },
+            "description": "Uses the first player 'Linked players' found."
+          }
+        }
+      ]
+    },
+    {
       "name": "bets and events",
       "item": [
         {
@@ -1012,6 +1193,161 @@
                 {
                   "key": "limit",
                   "value": "20"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Events - kickoff order",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "const isPage = pm.response.code === 200 && Array.isArray(body.items);",
+                  "",
+                  "pm.test(\"200 with a page of results\", function () {",
+                  "    pm.expect(pm.response.code, `got ${pm.response.code}: ${body.detail || body.title || \"\"}`).to.equal(200);",
+                  "    pm.expect(body.items, \"response has no items\").to.be.an(\"array\");",
+                  "});",
+                  "",
+                  "// (start_time, id) as one comparable key: kickoff first, id breaks ties",
+                  "const key = (e) => [Date.parse(e.start_time), e.id];",
+                  "const before = (a, b) => a[0] < b[0] || (a[0] === b[0] && a[1] < b[1]);",
+                  "",
+                  "if (isPage) {",
+                  "    pm.test(\"in kickoff order, ties broken by id\", function () {",
+                  "        for (let i = 1; i < body.items.length; i++) {",
+                  "            pm.expect(before(key(body.items[i - 1]), key(body.items[i])), `item ${i}`).to.be.true;",
+                  "        }",
+                  "    });",
+                  "    const last = body.items[body.items.length - 1];",
+                  "    pm.collectionVariables.set(\"kickoffCursor\", body.next_cursor);",
+                  "    pm.collectionVariables.set(\"lastKickoff\", JSON.stringify(key(last)));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/events?sort=start_time&limit=4",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "sort",
+                  "value": "start_time"
+                },
+                {
+                  "key": "limit",
+                  "value": "4"
+                }
+              ]
+            },
+            "description": "limit=4 on purpose: on the generated data the first page ends half-way through a pair of matches with the same kickoff, so the next request checks the cursor across a tie."
+          }
+        },
+        {
+          "name": "Events - kickoff order, next page",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "const isPage = pm.response.code === 200 && Array.isArray(body.items);",
+                  "",
+                  "pm.test(\"200 with a page of results\", function () {",
+                  "    pm.expect(pm.response.code, `got ${pm.response.code}: ${body.detail || body.title || \"\"}`).to.equal(200);",
+                  "    pm.expect(body.items, \"response has no items\").to.be.an(\"array\");",
+                  "});",
+                  "",
+                  "if (isPage) {",
+                  "    pm.test(\"carries on exactly after the last match of page 1, even inside a tie\", function () {",
+                  "        const [lastTime, lastId] = JSON.parse(pm.collectionVariables.get(\"lastKickoff\"));",
+                  "        const first = body.items[0];",
+                  "        const t = Date.parse(first.start_time);",
+                  "        pm.expect(t > lastTime || (t === lastTime && first.id > lastId)).to.be.true;",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/events?sort=start_time&limit=4&cursor={{kickoffCursor}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "sort",
+                  "value": "start_time"
+                },
+                {
+                  "key": "limit",
+                  "value": "4"
+                },
+                {
+                  "key": "cursor",
+                  "value": "{{kickoffCursor}}"
+                }
+              ]
+            },
+            "description": "Uses the cursor 'Events - kickoff order' saved."
+          }
+        },
+        {
+          "name": "Kickoff cursor on an id-sorted list - 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400: a cursor belongs to one sort\", function () {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().detail).to.equal(\"This cursor was made for sort=start_time; ask with the same sort.\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/events?cursor={{kickoffCursor}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "cursor",
+                  "value": "{{kickoffCursor}}"
                 }
               ]
             }

@@ -260,7 +260,7 @@ appears in a page, a cookie or a network request the browser can see.
 | Player — linked accounts | `GET /v1/players/{id}/linked` | **new** |
 | Bets — every player, newest first, filter by status and stake | `GET /v1/bets` | **new** |
 | Bet — legs, match, settlement | `GET /v1/bets/{id}` | yes |
-| Events — upcoming, in kickoff order | `GET /v1/events?order=start_time` | **extended** |
+| Events — upcoming, in kickoff order | `GET /v1/events?sort=start_time` | **extended** |
 | Event — markets and prices | `GET /v1/events/{id}` | yes |
 
 Deliberately read-only. Running risk checks and a review queue are left for later.
@@ -276,11 +276,13 @@ Deliberately read-only. Running risk checks and a review queue are left for late
       `placed_after`. The admin view of "what is happening now".
 - [x] **`order=desc` on lists** — newest first. The cursor records which direction
       it was made for, and a cursor used the wrong way round is a 400.
-- [ ] **`GET /v1/events?order=start_time`** — kickoff order. That breaks the simple
+- [x] **`GET /v1/events?sort=start_time`** — kickoff order. (`sort`, not `order`:
+      since step 2 `order` means the direction.) That breaks the simple
       `id > cursor` rule: the cursor must carry `(start_time, id)` and the query
-      becomes a row comparison, `(start_time, id) > (%s, %s)`, with an index to match.
-- [ ] **`GET /v1/players/{id}/sessions`** — logins with IP, device and user agent.
-- [ ] **`GET /v1/players/{id}/linked`** — other players sharing a device or a payment
+      becomes a row comparison, `(start_time, id) > (%s, %s)`, with an index to
+      match — migration `004_events_kickoff_order.sql`.
+- [x] **`GET /v1/players/{id}/sessions`** — logins with IP, device and user agent.
+- [x] **`GET /v1/players/{id}/linked`** — other players sharing a device or a payment
       method, and which of the two they share. The API compares fingerprints
       *server-side* and returns only the link — so the panel can investigate
       multi-accounting without the fingerprint ever leaving the database.
@@ -332,8 +334,8 @@ Run with `flask --app app run --port 5000 --debug` from `admin/`.
 
 - [x] 1. API: scoped keys and the 403
 - [x] 2. API: `GET /v1/bets` and `order=desc`
-- [ ] 3. API: events in kickoff order (the two-column cursor)
-- [ ] 4. API: `/players/{id}/sessions` and `/players/{id}/linked`
+- [x] 3. API: events in kickoff order (the two-column cursor)
+- [x] 4. API: `/players/{id}/sessions` and `/players/{id}/linked`
 - [ ] 5. Panel skeleton: app factory, config, API client, base template, error pages
 - [ ] 6. Login
 - [ ] 7. Players: list with filters and load-more, player page with tabs

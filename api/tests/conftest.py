@@ -40,6 +40,25 @@ PASSTHROUGH_PLAYER = 3
 VELOCITY_PLAYER = 4
 SUSPENDED_PLAYER = 7
 
+# Linked accounts, around player 1:
+#   player 5 logged in twice from player 1's laptop      - still 1 shared device
+#   player 6 uses player 1's card                        - 1 shared payment method
+#   player 8 used player 1's phone AND player 1's card   - 1 of each
+# Player 1 has two devices and three sessions, two of them on the laptop.
+LAPTOP = "aaaaaaaa-0000-4000-8000-000000000001"
+PHONE = "aaaaaaaa-0000-4000-8000-000000000002"
+SHARED_CARD = "ab" * 32           # player 1's card fingerprint, from load_money_history
+FIXTURE_SESSIONS = [
+    # player, device, ip, started_at
+    (1, LAPTOP, "198.51.100.10", (5, 9)),
+    (1, LAPTOP, "198.51.100.10", (6, 9)),
+    (1, PHONE, "203.0.113.7", (7, 20)),
+    (5, LAPTOP, "198.51.100.10", (5, 21)),
+    (5, LAPTOP, "198.51.100.10", (6, 21)),      # twice: the link must still count once
+    (8, PHONE, "203.0.113.99", (9, 11)),
+]
+CARD_SHARERS = [6, 8]
+
 
 def at(day: int, hour: int = 10, minute: int = 0) -> datetime:
     return datetime(2026, 8, day, hour, minute, tzinfo=timezone.utc)
@@ -154,6 +173,7 @@ def seeded_db():
         selection_ids = load_events(conn)
         load_money_history(conn, PLAYER_WITH_MONEY, selection_ids)
         load_risk_histories(conn)
+        load_links(conn)
         # the simulated clock the risk checks measure against
         conn.execute(
             "INSERT INTO sim_state (id, sim_time, seed, days) VALUES (1, %s, 42, 14) "
@@ -161,6 +181,23 @@ def seeded_db():
             (SIM_NOW,),
         )
     yield
+
+
+def load_links(conn: psycopg.Connection) -> None:
+    """Sessions for the linked-accounts players, and the card player 1 shares."""
+    for player_id, device, ip, (day, hour) in FIXTURE_SESSIONS:
+        started = at(day, hour)
+        conn.execute(
+            "INSERT INTO sessions (player_id, started_at, ended_at, ip, device_id, user_agent) "
+            "VALUES (%s, %s, %s, %s, %s, 'pytest')",
+            (player_id, started, started + timedelta(minutes=30), ip, device),
+        )
+    for player_id in CARD_SHARERS:
+        conn.execute(
+            "INSERT INTO payment_methods (player_id, type, fingerprint, last4, added_at) "
+            "VALUES (%s, 'card', %s, '4242', %s)",
+            (player_id, SHARED_CARD, at(5, 9)),
+        )
 
 
 def load_risk_histories(conn: psycopg.Connection) -> None:

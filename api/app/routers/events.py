@@ -1,6 +1,7 @@
 """Events (matches), and the markets and selections you can bet on."""
 
 from http import HTTPStatus
+from typing import Literal
 
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
@@ -22,13 +23,17 @@ EVENT_COLUMNS = sql.SQL(
 @router.get(
     "",
     summary="List events",
-    description="Ordered by id, like every list in this API - that is what makes the "
-    "cursor stable. Filter with `from` and `to` to get a kickoff window.",
+    description="Ordered by id unless `sort=start_time`, which lists matches in kickoff "
+    "order - ties broken by id, so paging never skips a match that shares a kickoff "
+    "time. Filter with `from` and `to` to get a kickoff window.",
     response_model=EventPage,
     responses=errors.responses(400),
 )
 def list_events(
     page: PageParams = Depends(),
+    sort: Literal["id", "start_time"] = Query(
+        "id", description="`id` (default) or `start_time`, kickoff order."
+    ),
     status: EventStatus | None = None,
     league: str | None = Query(None, min_length=1, max_length=100, examples=["Premier League"]),
     # `from` is a Python keyword, so it cannot be a parameter name. alias= keeps the
@@ -45,7 +50,8 @@ def list_events(
         # plain 422: the HTTPStatus name for it only exists from Python 3.13
         raise HTTPException(422, "`from` must be earlier than `to`.")
 
-    conditions = [page.after_cursor("id")]
+    page.sorted_by(sort)
+    conditions = [page.after_cursor()]
     params = page.params()
     if status is not None:
         conditions.append(sql.SQL("status = %(status)s"))
@@ -65,7 +71,7 @@ def list_events(
     query = sql.SQL(
         "SELECT {columns} FROM events WHERE {where} ORDER BY {order} LIMIT %(limit)s"
     ).format(columns=EVENT_COLUMNS, where=sql.SQL(" AND ").join(conditions),
-             order=page.order_by("id"))
+             order=page.order_by())
 
     rows = conn.execute(query, params).fetchall()
     return build_page(rows, page, EventSummary.model_validate, EventPage)

@@ -9,24 +9,37 @@ which means the same thing no matter what was inserted meanwhile.
 It is also faster: OFFSET 100000 makes Postgres read and throw away 100000 rows,
 while `id > 4812` is a single index lookup.
 
-Two directions, `order=asc` (oldest first, the default) and `order=desc` (newest
-first). Note what each one does with rows created while you page:
+Direction
+---------
+`order=asc` (oldest first, the default) and `order=desc` (newest first). Rows created
+while you page: ascending, they turn up on a later page; descending, they are above
+where you started and never appear - start again from the top to see them.
 
-  asc   new rows have higher ids, so they turn up on a later page
-  desc  new rows have higher ids than where you STARTED, so they never appear -
-        to see them, start again from the top. That is how every newest-first feed
-        works, and it is the price of never skipping or repeating a row.
+Sorting by something other than id
+----------------------------------
+Events can also be listed in kickoff order. Kickoff times repeat - the generator uses
+five a day - so "carry on after 15:00" would skip every other 15:00 match. The id is
+added as a tie-breaker, the cursor carries both, and the condition becomes a ROW
+COMPARISON:
+
+    (start_time, id) > ('2026-08-10 15:00+00', 482)
+
+which Postgres reads as "a later kickoff, or the same kickoff and a higher id" - the
+exact place the last page stopped, ties included. Both columns must be sorted in the
+same direction for that to hold.
 
 The cursor is opaque on purpose. Clients get a token and send it back; they must not
-build one themselves. That leaves room to change what is inside - as this module has
-already done once, adding the direction - without breaking anyone.
+build one themselves. Inside it are the sort, the direction and the last row's sort
+values - and the format has already changed twice without breaking a client.
 
 Every router asks this module for the cursor condition and the ORDER BY, instead of
-writing `id > ...` itself, so the direction logic exists in exactly one place.
+writing `id > ...` itself, so all of this exists in exactly one place.
 """
 
 import base64
 import binascii
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Generic, Literal, TypeVar
 
 from fastapi import HTTPException, Query, status
@@ -37,7 +50,12 @@ T = TypeVar("T")
 
 Order = Literal["asc", "desc"]
 
-_PREFIX = "id:"   # a version marker of sorts: a cursor from something else fails to decode
+# Each sort a list can use, and the columns that make it a total order. A sort on a
+# column with repeats always ends with id, so no two rows ever tie.
+SORTS: dict[str, tuple[str, ...]] = {
+    "id": ("id",),
+    "start_time": ("start_time", "id"),
+}
 
 
 class Page(BaseModel, Generic[T]):
@@ -47,48 +65,70 @@ class Page(BaseModel, Generic[T]):
     )
 
 
-def encode(last_id: int, order: Order = "asc") -> str:
-    raw = f"{_PREFIX}{order}:{last_id}".encode()
+@dataclass(frozen=True)
+class Cursor:
+    sort: str
+    order: Order
+    values: tuple
+
+
+# ------------------------------------------------------------- encoding
+
+def encode(sort: str, order: Order, values: tuple) -> str:
+    """"<sort>:<order>:<value>|<value>", base64url without padding."""
+    parts = "|".join(v.isoformat() if isinstance(v, datetime) else str(v) for v in values)
+    raw = f"{sort}:{order}:{parts}".encode()
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 
-def decode(cursor: str, order: Order = "asc") -> int:
-    """The id to carry on from. 400 if the cursor was not made by encode(), or was made
-    for the other direction."""
+def decode(cursor: str) -> Cursor:
+    """What a cursor says. 400 if this API did not make it."""
     try:
         padded = cursor + "=" * (-len(cursor) % 4)
         raw = base64.urlsafe_b64decode(padded.encode()).decode()
-        if not raw.startswith(_PREFIX):
-            raise ValueError("wrong prefix")
-        body = raw.removeprefix(_PREFIX)
-        if ":" in body:
-            made_for, _, number = body.partition(":")
+        sort, _, rest = raw.partition(":")
+        if sort not in SORTS:
+            raise ValueError("unknown sort")
+        if ":" in rest:
+            made_for, _, parts = rest.partition(":")
         else:
-            # A cursor from before `order` existed ("id:4812"): those were all ascending.
-            # Accepting it is cheap, and a client mid-way through paging keeps working.
-            made_for, number = "asc", body
+            # The first cursor format, "id:4812", from before `order` existed. Those
+            # were all ascending; a client mid-way through paging keeps working.
+            made_for, parts = "asc", rest
         if made_for not in ("asc", "desc"):
             raise ValueError("unknown order")
-        last_id = int(number)
-        if last_id < 0:
-            raise ValueError("negative id")
+        values = _parse_values(sort, parts.split("|"))
     except (ValueError, binascii.Error, UnicodeDecodeError):
         # 400, not 422: the parameter is well-formed as a string, but it is not a
         # cursor this API issued. The client sent something it should not have.
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid cursor.")
+    return Cursor(sort, made_for, values)
 
-    if made_for != order:
-        # "after 4812" means opposite things in the two directions. Using an ascending
-        # cursor for a descending page would silently return the wrong rows.
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            f"This cursor was made for order={made_for}; ask with the same order.",
-        )
-    return last_id
 
+def _parse_values(sort: str, parts: list[str]) -> tuple:
+    if len(parts) != len(SORTS[sort]):
+        raise ValueError("wrong number of values")
+    values = []
+    for column, part in zip(SORTS[sort], parts):
+        if column == "id":
+            value = int(part)
+            if value < 0:
+                raise ValueError("negative id")
+        else:
+            value = datetime.fromisoformat(part)
+            if value.tzinfo is None:
+                raise ValueError("time without a zone")
+        values.append(value)
+    return tuple(values)
+
+
+# ------------------------------------------------------------ parameters
 
 class PageParams:
-    """`limit`, `cursor` and `order` query parameters, shared by every list endpoint."""
+    """`limit`, `cursor` and `order` query parameters, shared by every list endpoint.
+
+    A list sorted by anything other than id calls sorted_by() before using it.
+    """
 
     def __init__(
         self,
@@ -98,31 +138,65 @@ class PageParams:
     ):
         self.limit = limit
         self.order = order
-        self.last_id = decode(cursor, order) if cursor else None
+        self.sort = "id"
+        self._cursor = decode(cursor) if cursor else None
+        if self._cursor is not None and self._cursor.order != order:
+            # "after 4812" means opposite things in the two directions. Using an
+            # ascending cursor for a descending page would silently return wrong rows.
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"This cursor was made for order={self._cursor.order}; ask with the same order.",
+            )
 
-    def after_cursor(self, *column: str) -> sql.Composable:
+    def sorted_by(self, sort: str) -> "PageParams":
+        self.sort = sort
+        return self
+
+    def _cursor_values(self) -> tuple | None:
+        if self._cursor is None:
+            return None
+        if self._cursor.sort != self.sort:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"This cursor was made for sort={self._cursor.sort}; ask with the same sort.",
+            )
+        return self._cursor.values
+
+    def _columns(self, table: str | None) -> list[sql.Identifier]:
+        return [sql.Identifier(table, c) if table else sql.Identifier(c) for c in SORTS[self.sort]]
+
+    def after_cursor(self, table: str | None = None) -> sql.Composable:
         """The WHERE condition that starts this page where the last one ended.
 
-        `column` is the id column, optionally qualified: after_cursor("t", "id").
-        On the first page there is nothing to start after, so the condition is TRUE.
+        `table` qualifies the columns when the query has several tables:
+        after_cursor("t") gives t.id. On the first page there is nothing to start
+        after, so the condition is TRUE.
         """
-        if self.last_id is None:
+        values = self._cursor_values()
+        if values is None:
             return sql.SQL("TRUE")
         operator = ">" if self.order == "asc" else "<"
-        return sql.SQL("{column} {operator} %(cursor_id)s").format(
-            column=sql.Identifier(*column), operator=sql.SQL(operator)
+        placeholders = [sql.Placeholder(f"cursor_{i}") for i in range(len(values))]
+        # A row comparison - (a, b) > (x, y) - even for one column, where it is just
+        # a > x. One code path, whatever the sort.
+        return sql.SQL("({columns}) {operator} ({values})").format(
+            columns=sql.SQL(", ").join(self._columns(table)),
+            operator=sql.SQL(operator),
+            values=sql.SQL(", ").join(placeholders),
         )
 
-    def order_by(self, *column: str) -> sql.Composable:
-        direction = "ASC" if self.order == "asc" else "DESC"
-        return sql.SQL("{column} {direction}").format(
-            column=sql.Identifier(*column), direction=sql.SQL(direction)
+    def order_by(self, table: str | None = None) -> sql.Composable:
+        direction = sql.SQL("ASC" if self.order == "asc" else "DESC")
+        return sql.SQL(", ").join(
+            sql.SQL("{column} {direction}").format(column=c, direction=direction)
+            for c in self._columns(table)
         )
 
     def params(self) -> dict:
         """The parameters after_cursor() and the LIMIT need. Fetches one row more than
         the page holds - see build_page."""
-        return {"cursor_id": self.last_id, "limit": self.limit + 1}
+        values = self._cursor_values() or ()
+        return {"limit": self.limit + 1, **{f"cursor_{i}": v for i, v in enumerate(values)}}
 
 
 def build_page(rows: list, params: PageParams, to_item, page_class: type[Page] = Page) -> Page:
@@ -130,9 +204,13 @@ def build_page(rows: list, params: PageParams, to_item, page_class: type[Page] =
 
     Fetching one row more than asked for is how we know whether a next page exists,
     without a second COUNT(*) query: if the extra row came back, there is more.
+    The next cursor holds the last row's sort values - every column of the sort.
     """
     has_more = len(rows) > params.limit
     rows = rows[: params.limit]
     items = [to_item(row) for row in rows]
-    next_cursor = encode(rows[-1]["id"], params.order) if has_more else None
+    next_cursor = None
+    if has_more:
+        last = rows[-1]
+        next_cursor = encode(params.sort, params.order, tuple(last[c] for c in SORTS[params.sort]))
     return page_class(items=items, next_cursor=next_cursor)
