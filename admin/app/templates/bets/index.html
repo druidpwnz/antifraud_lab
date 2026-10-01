@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% block title %}Bets{% endblock %}
+{% block content %}
+<div class="page-header row wrap">
+  <div class="max">
+    <h4 class="no-margin">Bets</h4>
+    <p class="no-margin secondary-text">Every player's bets. Filters apply as you change them.</p>
+  </div>
+  {{ ui.go_box("bets.go", "Bet ID") }}
+</div>
+
+{% call ui.filter_form("bets.index", "#bet-rows") %}
+  {{ ui.select("status", "Status", statuses, filters.status, any_label="Any") }}
+  <div class="field label border small">
+    {# applies on Enter - see filter_form in _macros.html #}
+    <input id="min_stake" name="min_stake" inputmode="decimal" placeholder=" "
+           value="{{ filters.min_stake }}">
+    <label for="min_stake">Minimum stake</label>
+  </div>
+  {{ ui.select("order", "Order", orders, filters.order) }}
+{% endcall %}
+
+<article class="round border no-padding table-card">
+  <table class="border">
+    <thead>
+      <tr><th>Bet</th><th>Player</th><th>Placed</th><th>Stake</th><th>Odds</th><th>Status</th><th>Payout</th></tr>
+    </thead>
+    <tbody id="bet-rows">
+      {% include "bets/_rows.html" %}
+    </tbody>
+  </table>
+</article>
+{% endblock %}

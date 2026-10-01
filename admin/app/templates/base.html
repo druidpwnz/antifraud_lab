@@ -4,6 +4,8 @@
 {%- set nav = [
     ("home.index", "dashboard", "Home"),
     ("players.index", "group", "Players"),
+    ("bets.index", "receipt_long", "Bets"),
+    ("events.index", "stadium", "Events"),
 ] -%}
 {#- a section stays highlighted on its sub-pages too: /players/5 lights up "Players" -#}
 {%- set section = (request.endpoint or "").split(".")[0] -%}
@@ -14,6 +16,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Antifraud Lab{% endblock %} · Admin</title>
   <link rel="icon" href="data:,">
+  {# dark scrollbars and native form controls, to match body.dark #}
+  <meta name="color-scheme" content="dark">
   <link rel="stylesheet" href="{{ url_for('static', filename='vendor/beercss/beer.min.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
   {#- htmx settings, read by htmx itself:
@@ -26,7 +30,7 @@
                          {"code": "[45]..", "swap": true, "error": true}]}'>
   <script src="{{ url_for('static', filename='vendor/htmx/htmx.min.js') }}" defer></script>
 </head>
-<body class="light">
+<body class="dark">
 {% if current_user.is_authenticated %}
 
   {# large screens: a navigation drawer #}

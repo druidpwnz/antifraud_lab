@@ -1,0 +1,50 @@
+{#- Pieces every list page uses. Import with:
+    {% import "_macros.html" as ui %} -#}
+
+{#- A filter dropdown, Material 3 outlined. `options` is a dict (value -> label) or a
+    list (each value is its own label, humanised). `any_label` adds a first option
+    with an empty value - "no filter"; the API client drops empty parameters. -#}
+{% macro select(name, label, options, current, any_label=None) -%}
+<div class="field label suffix border small">
+  <select id="{{ name }}" name="{{ name }}">
+    {% if any_label %}<option value="">{{ any_label }}</option>{% endif %}
+    {% if options is mapping %}
+    {% for value, text in options.items() %}<option value="{{ value }}" {% if current == value %}selected{% endif %}>{{ text }}</option>{% endfor %}
+    {% else %}
+    {% for value in options %}<option value="{{ value }}" {% if current == value %}selected{% endif %}>{{ value | humanise }}</option>{% endfor %}
+    {% endif %}
+  </select>
+  <label for="{{ name }}">{{ label }}</label>
+  <i>arrow_drop_down</i>
+</div>
+{%- endmacro %}
+
+{#- The "jump straight to one" box: a plain GET form to a /go endpoint. -#}
+{% macro go_box(endpoint, label) -%}
+<form method="get" action="{{ url_for(endpoint) }}" class="row">
+  <div class="field label border small">
+    <input id="go-id" name="id" inputmode="numeric" pattern="[0-9#]*" placeholder=" " required>
+    <label for="go-id">{{ label }}</label>
+  </div>
+  <button type="submit" class="circle" title="Open"><i>arrow_forward</i></button>
+</form>
+{%- endmacro %}
+
+{#- The filter form around the selects. Every change re-asks the list URL with the
+    form's values; htmx swaps the table body only and pushes the URL, so a filtered
+    list can be bookmarked or shared. Without JavaScript, Apply submits it.
+
+    Selects apply on "change". A text field applies on Enter, which submits the form:
+    "submit" is a trigger so htmx takes it over instead of the browser loading the
+    whole page. A text field's own "change" is left out on purpose - Enter fires it
+    too, and listening to both would send every search twice. hx-sync="this:replace"
+    makes a newer filter cancel a slower request still on its way. -#}
+{% macro filter_form(endpoint, target) -%}
+<form method="get" action="{{ url_for(endpoint) }}" class="row wrap filters"
+      hx-get="{{ url_for(endpoint) }}" hx-target="{{ target }}" hx-trigger="change from:(.filters select), submit"
+      hx-sync="this:replace" hx-push-url="true" hx-indicator="#rows-loading">
+  {{ caller() }}
+  <noscript><button type="submit">Apply</button></noscript>
+  <progress id="rows-loading" class="circle small htmx-indicator"></progress>
+</form>
+{%- endmacro %}

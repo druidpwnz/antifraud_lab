@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% block title %}Events{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h4 class="no-margin">Events</h4>
+  <p class="no-margin secondary-text">Matches in kickoff order. Filters apply as you change them.</p>
+</div>
+
+{% call ui.filter_form("events.index", "#event-rows") %}
+  {{ ui.select("status", "Status", statuses, filters.status) }}
+  {{ ui.select("league", "League", leagues, filters.league, any_label="Any") }}
+  {{ ui.select("order", "Order", orders, filters.order) }}
+{% endcall %}
+
+<article class="round border no-padding table-card">
+  <table class="border">
+    <thead>
+      <tr><th>Kickoff</th><th>Match</th><th>League</th><th>Status</th></tr>
+    </thead>
+    <tbody id="event-rows">
+      {% include "events/_rows.html" %}
+    </tbody>
+  </table>
+</article>
+{% endblock %}

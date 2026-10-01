@@ -1,0 +1,16 @@
+{#- Rows of the bets table, then the load-more row. Sent alone for htmx. -#}
+{% for b in bets %}
+<tr>
+  <td><a class="link" href="{{ url_for('bets.show', bet_id=b.id) }}">#{{ b.id }}</a></td>
+  <td><a class="link" href="{{ url_for('players.show', player_id=b.player_id) }}">#{{ b.player_id }}</a></td>
+  <td class="nowrap">{{ b.placed_at | when }}</td>
+  <td class="nowrap">{{ b.stake | money(b.currency) }}</td>
+  <td>{{ b.total_odds }}</td>
+  <td><span class="chip small tone-{{ b.status | status_colour }}">{{ b.status | humanise }}</span></td>
+  <td class="nowrap">{{ b.payout | money(b.currency) if b.payout is not none else '-' }}</td>
+</tr>
+{% endfor %}
+{% if not bets and not cursor %}
+<tr><td colspan="7" class="center-align secondary-text">No bets match these filters.</td></tr>
+{% endif %}
+{% include "_load_more.html" %}

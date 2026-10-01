@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}{{ event.home_team }} – {{ event.away_team }}{% endblock %}
+{% block content %}
+<a class="back-link link" href="{{ url_for('events.index') }}"><i>arrow_back</i><span>Events</span></a>
+<div class="page-header">
+  <nav class="row wrap">
+    <h4 class="no-margin">{{ event.home_team }} – {{ event.away_team }}</h4>
+    <span class="chip small tone-{{ event.status | status_colour }}">{{ event.status }}</span>
+    <span class="chip small border">{{ event.league }}</span>
+  </nav>
+  <p class="no-margin secondary-text">Kickoff {{ event.start_time | when }}
+    {%- if event.finished_at %} · finished {{ event.finished_at | when }}{% endif %}
+    · event #{{ event.id }}</p>
+</div>
+
+{% if not event.markets %}
+<p class="secondary-text">No markets on this match.</p>
+{% endif %}
+<div class="grid">
+  {% for m in event.markets %}
+  <article class="s12 m6 l4 round border no-padding table-card">
+    <nav class="row market-head">
+      <h6 class="max no-margin">{{ m.type | market }}</h6>
+      <span class="chip small border">{{ m.status }}</span>
+    </nav>
+    <table class="border">
+      <tbody>
+        {% for s in m.selections %}
+        <tr>
+          <td>{{ s.name }}</td>
+          <td class="right-align">{{ s.current_odds }}</td>
+          <td class="right-align"><span class="chip small tone-{{ s.status | status_colour }}">{{ s.status }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </article>
+  {% endfor %}
+</div>
+<p class="small-text secondary-text">Odds are the current prices. A bet keeps the price it was placed at.</p>
+{% endblock %}

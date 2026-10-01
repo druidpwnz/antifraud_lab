@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui %}
 {% block title %}Players{% endblock %}
 {% block content %}
 <div class="page-header row wrap">
@@ -6,47 +7,14 @@
     <h4 class="no-margin">Players</h4>
     <p class="no-margin secondary-text">Filters apply as you change them.</p>
   </div>
-  {# straight to a player, by id #}
-  <form method="get" action="{{ url_for('players.go') }}" class="row">
-    <div class="field label border small">
-      <input id="go-id" name="id" inputmode="numeric" pattern="[0-9#]*" placeholder=" " required>
-      <label for="go-id">Player ID</label>
-    </div>
-    <button type="submit" class="circle" title="Open player"><i>arrow_forward</i></button>
-  </form>
+  {{ ui.go_box("players.go", "Player ID") }}
 </div>
 
-{# Every change re-asks /players with the form's values. htmx swaps the rows only and
-   pushes the URL, so the filtered list can be bookmarked or shared. #}
-<form method="get" action="{{ url_for('players.index') }}" class="row wrap filters"
-      hx-get="{{ url_for('players.index') }}" hx-target="#player-rows" hx-trigger="change"
-      hx-push-url="true" hx-indicator="#rows-loading">
-  <div class="field label suffix border small">
-    <select id="country" name="country">
-      <option value="">Any</option>
-      {% for c in countries %}<option value="{{ c }}" {% if filters.country == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
-    </select>
-    <label for="country">Country</label>
-    <i>arrow_drop_down</i>
-  </div>
-  <div class="field label suffix border small">
-    <select id="status" name="status">
-      <option value="">Any</option>
-      {% for s in statuses %}<option value="{{ s }}" {% if filters.status == s %}selected{% endif %}>{{ s | humanise }}</option>{% endfor %}
-    </select>
-    <label for="status">Status</label>
-    <i>arrow_drop_down</i>
-  </div>
-  <div class="field label suffix border small">
-    <select id="order" name="order">
-      {% for value, label in orders.items() %}<option value="{{ value }}" {% if filters.order == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
-    </select>
-    <label for="order">Order</label>
-    <i>arrow_drop_down</i>
-  </div>
-  <noscript><button type="submit">Apply</button></noscript>
-  <progress id="rows-loading" class="circle small htmx-indicator"></progress>
-</form>
+{% call ui.filter_form("players.index", "#player-rows") %}
+  {{ ui.select("country", "Country", countries, filters.country, any_label="Any") }}
+  {{ ui.select("status", "Status", statuses, filters.status, any_label="Any") }}
+  {{ ui.select("order", "Order", orders, filters.order) }}
+{% endcall %}
 
 <article class="round border no-padding table-card">
   <table class="border">

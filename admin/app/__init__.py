@@ -19,7 +19,7 @@ from app.api_client import ApiClient, ApiError, ApiUnavailable
 from app.htmx import render
 from app import formatting
 from app.auth import init_auth
-from app.views import home, players
+from app.views import bets, events, home, players
 
 log = logging.getLogger(__name__)
 
@@ -52,6 +52,8 @@ def create_app(overrides: dict | None = None, transport=None) -> Flask:
     init_auth(app)                  # every page needs a login from here on
     app.register_blueprint(home.bp)
     app.register_blueprint(players.bp)
+    app.register_blueprint(bets.bp)
+    app.register_blueprint(events.bp)
     register_error_pages(app)
 
     app.jinja_env.filters.update(
@@ -59,6 +61,7 @@ def create_app(overrides: dict | None = None, transport=None) -> Flask:
         when=formatting.when,
         status_colour=formatting.status_colour,
         humanise=formatting.humanise,
+        market=formatting.market,
     )
 
     @app.after_request

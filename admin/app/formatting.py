@@ -45,6 +45,14 @@ def status_colour(status: str) -> str:
     return STATUS_COLOURS.get(status, "")
 
 
+# What the generator's market types are called on a betting site
+MARKET_NAMES = {"1x2": "Match result", "total_goals": "Total goals", "both_teams_score": "Both teams to score"}
+
+
+def market(market_type: str) -> str:
+    return MARKET_NAMES.get(market_type, humanise(market_type))
+
+
 def humanise(value: str) -> str:
     """ "self_excluded" -> "self excluded" """
     return value.replace("_", " ")

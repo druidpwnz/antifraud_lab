@@ -1,0 +1,13 @@
+{#- Rows of the events table, then the load-more row. Sent alone for htmx. -#}
+{% for e in events %}
+<tr>
+  <td class="nowrap">{{ e.start_time | when }}</td>
+  <td><a class="link" href="{{ url_for('events.show', event_id=e.id) }}">{{ e.home_team }} – {{ e.away_team }}</a></td>
+  <td>{{ e.league }}</td>
+  <td><span class="chip small tone-{{ e.status | status_colour }}">{{ e.status }}</span></td>
+</tr>
+{% endfor %}
+{% if not events and not cursor %}
+<tr><td colspan="4" class="center-align secondary-text">No matches match these filters.</td></tr>
+{% endif %}
+{% include "_load_more.html" %}

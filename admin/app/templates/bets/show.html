@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Bet #{{ bet.id }}{% endblock %}
+{% block content %}
+<a class="back-link link" href="{{ url_for('bets.index') }}"><i>arrow_back</i><span>Bets</span></a>
+<div class="page-header">
+  <nav class="row wrap">
+    <h4 class="no-margin">Bet #{{ bet.id }}</h4>
+    <span class="chip small tone-{{ bet.status | status_colour }}">{{ bet.status | humanise }}</span>
+    <a class="chip small border" href="{{ url_for('players.show', player_id=bet.player_id) }}">
+      <i>person</i><span>Player #{{ bet.player_id }}</span>
+    </a>
+  </nav>
+  <p class="no-margin secondary-text">Placed {{ bet.placed_at | when }}
+    · {{ bet.legs | length }} leg{{ '' if bet.legs | length == 1 else 's' }}</p>
+</div>
+
+{% if warnings %}
+{# facts read off this page, not detection - see warnings_for() in views/bets.py #}
+<article class="round warnings">
+  <div class="row top-align">
+    <i>warning</i>
+    <div class="max">
+      {% for w in warnings %}<p class="no-margin">{{ w }}</p>{% endfor %}
+    </div>
+  </div>
+</article>
+{% endif %}
+
+<div class="grid balance">
+  <article class="s6 m3 round border">
+    <p class="no-margin secondary-text">Stake</p>
+    <h6 class="no-margin">{{ bet.stake | money(bet.currency) }}</h6>
+  </article>
+  <article class="s6 m3 round border">
+    <p class="no-margin secondary-text">Odds</p>
+    <h6 class="no-margin">{{ bet.total_odds }}</h6>
+  </article>
+  <article class="s6 m3 round border">
+    <p class="no-margin secondary-text">Result</p>
+    <h6 class="no-margin">{{ bet.settlement.result | humanise if bet.settlement else 'Not settled' }}</h6>
+  </article>
+  <article class="s6 m3 round border">
+    <p class="no-margin secondary-text">Payout</p>
+    <h6 class="no-margin">{{ bet.settlement.payout | money(bet.currency) if bet.settlement else '-' }}</h6>
+    {% if bet.settlement %}<p class="no-margin small-text secondary-text">{{ bet.settlement.settled_at | when }}</p>{% endif %}
+  </article>
+</div>
+
+<h6>Legs</h6>
+<article class="round border no-padding table-card">
+  <table class="border">
+    <thead>
+      <tr><th>Match</th><th>Kickoff</th><th>Market</th><th>Pick</th><th>Odds taken</th><th>Leg</th></tr>
+    </thead>
+    <tbody>
+      {% for leg in bet.legs %}
+      <tr>
+        <td>
+          <a class="link" href="{{ url_for('events.show', event_id=leg.event.id) }}">{{ leg.event.home_team }} – {{ leg.event.away_team }}</a>
+          <div class="small-text secondary-text">{{ leg.event.league }}</div>
+        </td>
+        <td class="nowrap">{{ leg.event.start_time | when }}</td>
+        <td>{{ leg.market.type | market }}</td>
+        <td>{{ leg.name }}</td>
+        <td>{{ leg.odds_at_placement }}</td>
+        <td><span class="chip small tone-{{ leg.selection_status | status_colour }}">{{ leg.selection_status }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</article>
+{% endblock %}

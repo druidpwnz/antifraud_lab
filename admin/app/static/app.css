@@ -63,6 +63,15 @@
   margin-block-start: 1rem;
 }
 
+/* the phone's bottom bar has room for icons only; the button's title still names the user */
+nav.bottom .logout span {
+  display: none;
+}
+nav.bottom .logout button {
+  padding-inline: 0;      /* Beer's 1rem each side made it 88px in a 56px slot */
+  min-inline-size: 3.5rem; /* and still a full-size tap target, like the links */
+}
+
 /* the logout button in the navigation looks like the links around it */
 nav .logout button {
   width: 100%;
@@ -111,9 +120,10 @@ nav .logout button {
   inset-inline-start: 0.5rem;
 }
 
-/* Status chips: tonal, the Material 3 way - a light container and dark text of the
-   same hue - instead of Beer's saturated colours, which put dark text on mid-green.
-   The names are what formatting.status_colour returns. */
+/* Status chips: tonal, the Material 3 way - a container and text of the same hue -
+   instead of Beer's saturated colours, which put dark text on mid-green. Light
+   scheme: light container, dark text. Dark scheme (the panel's default, body.dark):
+   dark container, light text. The names are what formatting.status_colour returns. */
 .chip.tone-green       { background-color: #c8e6c9; color: #1b5e20; }
 .chip.tone-amber       { background-color: #ffecb3; color: #7a4f01; }
 .chip.tone-red         { background-color: #ffcdd2; color: #8e1c1c; }
@@ -121,4 +131,29 @@ nav .logout button {
 .chip.tone-teal        { background-color: #b2dfdb; color: #004d40; }
 .chip.tone-deep-orange { background-color: #ffccbc; color: #8a2c0d; }
 .chip.tone-grey        { background-color: #e0e0e0; color: #424242; }
+.dark .chip.tone-green       { background-color: #1e4620; color: #b9f0bb; }
+.dark .chip.tone-amber       { background-color: #4d3a00; color: #ffe08a; }
+.dark .chip.tone-red         { background-color: #5c1a1a; color: #ffc4c4; }
+.dark .chip.tone-blue        { background-color: #0d3a6b; color: #c4defc; }
+.dark .chip.tone-teal        { background-color: #00433b; color: #a6efe4; }
+.dark .chip.tone-deep-orange { background-color: #5e2410; color: #ffc9b5; }
+.dark .chip.tone-grey        { background-color: #3a3a3a; color: #dddddd; }
 .chip[class*="tone-"]  { border: none; }
+
+/* The warnings on a bet page sit above the cards, icon beside the list. Amber, not
+   error red: they say "look at this", not "something broke". */
+.warnings {
+  margin-block-end: 1rem;
+  box-shadow: none;
+  background-color: #ffecb3;
+  color: #5c3c00;
+}
+.dark .warnings {
+  background-color: #4d3a00;
+  color: #ffe08a;
+}
+
+/* a market card on an event page: a title row above its selections */
+.market-head {
+  padding: 0.75rem 1rem 0.25rem;
+}

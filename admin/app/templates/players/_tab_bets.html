@@ -1,6 +1,6 @@
 {% for b in rows %}
 <tr>
-  <td>#{{ b.id }}</td>
+  <td><a class="link" href="{{ url_for('bets.show', bet_id=b.id) }}">#{{ b.id }}</a></td>
   <td class="nowrap">{{ b.placed_at | when }}</td>
   <td class="nowrap">{{ b.stake | money(b.currency) }}</td>
   <td>{{ b.total_odds }}</td>
