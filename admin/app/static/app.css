@@ -53,3 +53,17 @@
 .htmx-request.htmx-indicator {
   opacity: 1;
 }
+
+/* the login card: centred, not too wide */
+.login {
+  max-width: 24rem;
+  margin: 10vh auto 0;
+}
+.login form button {
+  margin-block-start: 1rem;
+}
+
+/* the logout button in the navigation looks like the links around it */
+nav .logout button {
+  width: 100%;
+}

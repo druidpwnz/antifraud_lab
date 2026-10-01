@@ -62,7 +62,6 @@ def test_status_card_is_a_fragment_not_a_page(make_client):
 def probe(make_client):
     """A panel with one extra route that just asks the API for /probe."""
     def build(answer):
-        client = make_client({"/probe": answer})
         bp = Blueprint("probe", __name__)
 
         @bp.get("/probe")
@@ -70,8 +69,7 @@ def probe(make_client):
             current_app.extensions["api"].get("/probe")
             return "fine"
 
-        client.flask_app.register_blueprint(bp)
-        return client
+        return make_client({"/probe": answer}, blueprints=(bp,))
     return build
 
 
@@ -130,6 +128,7 @@ def test_the_api_key_never_reaches_the_browser(make_client, probe):
         probe((401, {"detail": "Missing or invalid API key."})).get("/probe"),
         probe(httpx.ConnectError("refused")).get("/probe"),
         make_client().get("/missing"),
+        make_client(logged_in=False).get("/login"),
     ]
     for response in pages:
         assert API_KEY not in response.get_data(as_text=True)

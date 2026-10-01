@@ -17,6 +17,7 @@ from werkzeug.exceptions import HTTPException
 from app import config as config_module
 from app.api_client import ApiClient, ApiError, ApiUnavailable
 from app.htmx import render
+from app.auth import init_auth
 from app.views import home
 
 log = logging.getLogger(__name__)
@@ -47,6 +48,7 @@ def create_app(overrides: dict | None = None, transport=None) -> Flask:
 
     app.extensions["api"] = ApiClient(cfg.api_url, cfg.api_key, cfg.api_timeout, transport)
 
+    init_auth(app)                  # every page needs a login from here on
     app.register_blueprint(home.bp)
     register_error_pages(app)
 

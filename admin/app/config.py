@@ -14,6 +14,9 @@ class Config:
     api_key: str
     secret_key: str
     api_timeout: float
+    admin_users: str = ""            # "name:hash,name:hash" - see app/auth.py
+    session_hours: float = 8
+    secure_cookies: bool = False     # True once the panel is served over HTTPS
 
 
 def load(overrides: dict | None = None) -> Config:
@@ -29,6 +32,9 @@ def load(overrides: dict | None = None) -> Config:
         "api_url": os.environ.get("API_URL", "http://127.0.0.1:8000"),
         "api_key": os.environ.get("API_KEY", ""),
         "api_timeout": float(os.environ.get("API_TIMEOUT", "5")),
+        "admin_users": os.environ.get("ADMIN_USERS", ""),
+        "session_hours": float(os.environ.get("SESSION_HOURS", "8")),
+        "secure_cookies": os.environ.get("SECURE_COOKIES", "0") == "1",
         **overrides,
         "secret_key": secret_key,
     }

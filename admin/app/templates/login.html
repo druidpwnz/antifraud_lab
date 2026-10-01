@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Log in{% endblock %}
+{% block content %}
+<div class="login">
+  <article class="round border">
+    <nav class="row">
+      <i class="extra primary-text">shield_person</i>
+      <div class="max">
+        <h5 class="no-margin">Antifraud Lab</h5>
+        <p class="no-margin secondary-text">Back office</p>
+      </div>
+    </nav>
+
+    {% if error %}
+    <p class="error-text"><i>error</i> {{ error }}</p>
+    {% endif %}
+
+    <form method="post" novalidate>
+      {{ form.csrf_token }}
+      <div class="field label border">
+        {# placeholder=" ": Beer CSS floats the label up when :placeholder-shown stops matching,
+           so without one a pre-filled field (after a wrong password) draws the label over the text #}
+        {{ form.username(autocomplete="username", autofocus=true, required=true, placeholder=" ") }}
+        <label for="username">Username</label>
+      </div>
+      <div class="field label border">
+        {{ form.password(autocomplete="current-password", required=true, placeholder=" ") }}
+        <label for="password">Password</label>
+      </div>
+      <button type="submit" class="responsive"><i>login</i><span>Log in</span></button>
+    </form>
+  </article>
+</div>
+{% endblock %}

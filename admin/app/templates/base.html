@@ -24,6 +24,7 @@
   <script src="{{ url_for('static', filename='vendor/htmx/htmx.min.js') }}" defer></script>
 </head>
 <body class="light">
+{% if current_user.is_authenticated %}
 
   {# large screens: a navigation drawer #}
   <nav class="left max l">
@@ -38,6 +39,9 @@
       <i>{{ icon }}</i><span>{{ label }}</span>
     </a>
     {% endfor %}
+    <div class="max"></div>
+    <div class="divider"></div>
+    {% include "_logout.html" %}
   </nav>
 
   {# medium screens: a navigation rail #}
@@ -48,6 +52,8 @@
       <i>{{ icon }}</i><span>{{ label }}</span>
     </a>
     {% endfor %}
+    <div class="max"></div>
+    {% include "_logout.html" %}
   </nav>
 
   {# phones: a bottom bar #}
@@ -57,7 +63,9 @@
       <i>{{ icon }}</i>
     </a>
     {% endfor %}
+    {% include "_logout.html" %}
   </nav>
+{% endif %}
 
   <main class="responsive">
     {% block content %}{% endblock %}

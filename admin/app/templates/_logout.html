@@ -1,0 +1,8 @@
+{#- Logging out is a POST with a CSRF token, never a link: a GET /logout would let
+    any page on the internet log you out with <img src="/logout">. -#}
+<form method="post" action="{{ url_for('auth.logout') }}" class="logout">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button type="submit" class="transparent" title="Log out {{ current_user.id }}">
+    <i>logout</i><span>{{ current_user.id }}</span>
+  </button>
+</form>
