@@ -119,6 +119,9 @@ def test_unknown_panel_url_is_a_404_page(make_client):
 
 # ------------------------------------------------------------------- security
 
+EMPTY_PAGE = {"items": [], "next_cursor": None}
+
+
 def test_the_api_key_never_reaches_the_browser(make_client, probe):
     # The point of the panel calling the API server-side: the key stays on the server.
     pages = [
@@ -129,6 +132,9 @@ def test_the_api_key_never_reaches_the_browser(make_client, probe):
         probe(httpx.ConnectError("refused")).get("/probe"),
         make_client().get("/missing"),
         make_client(logged_in=False).get("/login"),
+        make_client(HEALTHY_API).get("/players"),
+        make_client({"/v1/bets": (200, EMPTY_PAGE)}).get("/bets", headers={"HX-Request": "true"}),
+        make_client({"/v1/events": (200, EMPTY_PAGE)}).get("/events"),
     ]
     for response in pages:
         assert API_KEY not in response.get_data(as_text=True)

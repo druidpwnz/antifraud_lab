@@ -19,9 +19,9 @@ Advanced SQL is no longer the target — the rules layer stays deliberately thin
 | 3 | Fraud injector | **3 patterns done** |
 | 4 | Live generator | **done** (no metrics yet) |
 | 5 | Thin alerting (fills `alerts`) | **postponed** — after the API |
-| 6 | API — FastAPI | **done** — 12 endpoints, 94 tests, Postman collection |
-| 7 | Admin panel — Flask + Jinja + HTMX, over the API | **next** |
-| 8 | Compose, for real | not started |
+| 6 | API — FastAPI | **done** — 15 endpoints, 140 tests, Postman collection |
+| 7 | Admin panel — Flask + Jinja + HTMX, over the API | **done** — players, bets, events; 140 tests |
+| 8 | Compose, for real | **next** |
 | 9 | Grafana + Prometheus — fraud alerting | not started |
 | 10 | CI/CD — GitHub Actions | not started |
 
@@ -32,7 +32,11 @@ backfill, and `db/tests/invariants.sql` — twelve checks that must hold at any 
 size, which raise and exit non-zero when they do not.
 
 The API is in [`api/`](api/README.md): read access to players, money, bets and
-events, plus idempotent risk checks, with 94 tests and a Postman collection.
+events, plus idempotent risk checks, with 140 tests and a Postman collection.
+
+The admin panel is in [`admin/`](admin/README.md): a read-only back office over the
+API — players with their money, logins and linked accounts, every bet, every match —
+with a login, 140 tests and the API key kept out of the browser.
 
 ---
 
@@ -236,7 +240,7 @@ after risk checks have run, which shows the API never disturbed generator data.
 
 ---
 
-## Phase 7 — Admin panel (next)
+## Phase 7 — Admin panel (done)
 
 A back office for looking into players, their money, bets and matches. Flask renders
 Jinja templates; HTMX swaps pieces of the page without a JavaScript framework; every
@@ -246,19 +250,22 @@ byte of data comes from the API.
 browser ──HTML──> Flask panel ──HTTP + X-API-Key──> FastAPI ──> Postgres
 ```
 
+**How to run it, every page, and the problems met: [`admin/README.md`](admin/README.md).**
+This section is the design and the reasons for it.
+
 **The browser never talks to the API.** HTMX requests go to Flask, and Flask calls
 the API server-side. The API key lives only in the panel's environment — it never
 appears in a page, a cookie or a network request the browser can see.
 
 ### What it does
 
-| Page | Uses | API today? |
+| Page | Uses | API before phase 7 |
 |---|---|---|
 | Players — filter by country/status, load more | `GET /v1/players` | yes |
 | Player — balance, transactions, bets in tabs | `/balance`, `/transactions`, `/bets` | yes |
-| Player — devices and IPs | `GET /v1/players/{id}/sessions` | **new** |
-| Player — linked accounts | `GET /v1/players/{id}/linked` | **new** |
-| Bets — every player, newest first, filter by status and stake | `GET /v1/bets` | **new** |
+| Player — devices and IPs | `GET /v1/players/{id}/sessions` | **added** |
+| Player — linked accounts | `GET /v1/players/{id}/linked` | **added** |
+| Bets — every player, newest first, filter by status and stake | `GET /v1/bets` | **added** |
 | Bet — legs, match, settlement | `GET /v1/bets/{id}` | yes |
 | Events — upcoming, in kickoff order | `GET /v1/events?sort=start_time` | **extended** |
 | Event — markets and prices | `GET /v1/events/{id}` | yes |
@@ -299,7 +306,9 @@ Deliberately read-only. Running risk checks and a review queue are left for late
   - *live filter*: the filter form re-requests the table body on change
   - *load more*: the last row carries `next_cursor` and fetches the next page into
     place — cursor pagination and HTMX fit each other exactly
-  - *lazy tabs*: a player's transactions and bets load when the tab is opened
+  - *server-rendered tabs*: a tab is a link (`?tab=bets`); htmx swaps the tab bar
+    and its table together, so the server decides which tab is active, and the URL
+    makes Back, reload and bookmarks land on the right tab
   - one URL, two answers: a normal request gets the full page, an `HX-Request`
     gets only the fragment — every page still works with JavaScript off
 - **Login** with Flask-Login. Users come from `ADMIN_USERS` (usernames and password
@@ -323,7 +332,7 @@ Deliberately read-only. Running risk checks and a review queue are left for late
 
 ```
 admin/
-  requirements.txt      flask, flask-login, flask-wtf, httpx, pytest
+  requirements.txt      flask, flask-login, flask-wtf, httpx, python-dotenv, pytest
   .env.example          API_URL, API_KEY (a read key), SECRET_KEY, ADMIN_USERS
   app/
     __init__.py         create_app()
@@ -348,7 +357,7 @@ Run with `flask --app app run --port 5000 --debug` from `admin/`.
 - [x] 6. Login
 - [x] 7. Players: list with filters and load-more, player page with tabs
 - [x] 8. Bets and events pages
-- [ ] 9. Docs: `admin/README.md`, this section
+- [x] 9. Docs: `admin/README.md`, this section
 
 ### Proof it works
 
@@ -358,7 +367,33 @@ Run with `flask --app app run --port 5000 --debug` from `admin/`.
   check: every page needs a login; a full page vs an HTMX fragment; load-more passes
   the cursor on; an API 404 becomes a panel 404; an API outage becomes a friendly
   page; **the API key never appears in any HTML the panel returns**.
-- **End to end:** API and panel running together over the real generated data.
+- **End to end:** API and panel running together over the real generated data,
+  driven in Chromium by Playwright: filters, load more with no duplicate rows, tabs,
+  Back, phone width, and no console or CSP errors.
+
+140 panel tests in the end. The API grew from 12 endpoints to 15 and from 94 tests to
+140; the Postman collection to 36 requests with 60 checks.
+
+### What was found by testing, not by planning
+
+- **The Back button.** When htmx no longer has a page in its history cache, it asks
+  the server again and replaces the *whole* page with the answer. "One URL, two
+  answers" would have sent a fragment there; the panel now recognises that request
+  (`HX-History-Restore-Request`) and sends the full page.
+- **Enter in a filter field sent two requests** — the field's `change` and the
+  form's native submit. Selects now trigger on change and text fields on submit.
+  The first fix used a trigger selector with a space, which htmx's parser rejects —
+  in the browser only, with every pytest green; a test now pins the string.
+- **`when()` relabelled instead of converting:** a `+02:00` time was shown as UTC.
+  The API only sends `Z`, so nothing showed — until a test with an offset.
+- **Comparing ISO times as strings is wrong** once fractional seconds appear
+  (`"…00.5Z"` sorts before `"…00Z"`); the late-bet warning parses them.
+- **Beer CSS layout rules** — `<header>` moved to the top centre, `no-margin`
+  children removing a card's padding, `nav > ul` styled as a menu — only showed up in
+  screenshots. They are listed in `admin/README.md`.
+- **Fonts and CSP.** A machine with only Roboto Bold made every word bold (Roboto is
+  now vendored), and Beer CSS's CDN font fallback put four CSP errors on every page
+  (removed from the vendored file).
 
 ---
 
