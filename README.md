@@ -105,9 +105,15 @@ The same code path as backfill, running forward from where backfill stopped.
 - [x] Time compression from the environment, with `config.py` defaults:
 
 ```
-REAL_SECONDS_PER_SIM_HOUR=12   # 3600 = real time, 12 = one sim day per 5 minutes
-CATCH_UP=1                     # run flat out until the sim clock reaches now
+CATCH_UP=1                     # behind the real clock: run flat out until it is not
+REAL_SECONDS_PER_SIM_HOUR=12   # behind, with CATCH_UP=0: one sim day per 5 minutes
 ```
+
+      **Never ahead of the real clock** — found in phase 8, when the panel showed
+      bets settled five days in the future: once caught up, the loop went on at
+      12 s per simulated hour, 300× real time, and nothing stopped it at *now*.
+      Now an hour is generated only once it has ended in the real world, so after
+      the catch-up the data arrives an hour at a time, just after each full hour.
 
       Steps in whole simulated hours rather than the 5-minute ticks originally
       planned — that way live and backfill share `tick.one_hour()` exactly, instead of
@@ -459,7 +465,9 @@ dev loop.
   five weeks of simulated hours — about ten minutes in step 4, slower than expected
   because each hour has more players than the last — and months from now it is
   longer and the dataset bigger. The API and panel work while it catches up.
-  `CATCH_UP=0` in `.env` skips it.
+  `CATCH_UP=0` catches up slowly instead, one simulated hour every 12 s. Either
+  way it stops at *now*: after that each hour is written once it has really ended
+  (it used to carry on at 300× real time into the future — fixed in phase 8).
 - **The first `up -d` waits for the seed.** The generator depends on the seed having
   *finished*, so `docker compose up -d` only returns after the backfill — about
   half a minute — not at once.
@@ -485,6 +493,12 @@ dev loop.
 - **`hash-password` needs a terminal.** It asks for the password twice, hidden.
   `docker compose exec admin flask --app app hash-password <name>` gives it one;
   with `-T` or a pipe it aborts unless both lines come on stdin.
+- **Two copies on one machine are one project.** `name: antifraud` is fixed, so
+  `docker compose up -d` in a second clone does not start a second lab — it takes
+  over the first one's containers and its `antifraud_pgdata` volume. To run a
+  second copy beside the first, give it its own name and ports:
+  `docker compose -p afproof up -d`, with `API_PORT` / `PANEL_PORT` changed in its
+  `.env` (how step 6 ran).
 - **The `docker` group is root.** Adding yourself to it means `docker` without `sudo`
   — and anything able to run `docker` can become root on the machine.
 
@@ -524,7 +538,10 @@ with phase 5.
       (it reads, and a POST with it is 403); login holds across gunicorn's two
       workers; the panel container cannot even resolve `postgres`; with Postgres
       stopped `/ready` is 503 and the panel 503, and both recover by themselves
-- [ ] 6. Proof on a clean clone
+- [x] 6. Proof on a clean clone — every line of *Proof it works* below passed on a
+      clone built with `--no-cache --pull` (61 s to all healthy). Newman found the
+      one thing a fresh dataset breaks: `linkedPlayerId` was 5, picked from the old
+      local database, and player 5 has no links on a fresh seed — now 11
 - [ ] 7. Docs: a quick start at the top of this README, this section, the service READMEs
 
 ### Proof it works
@@ -532,14 +549,16 @@ with phase 5.
 - From a fresh `git clone` in another folder — so nothing untracked can help:
   `cp .env.example .env && docker compose up -d`, then `docker compose ps` shows
   every long-running service healthy and `migrate` / `seed` exited 0.
-- The Postman collection passes under Newman against the compose API. The seed is
+- The Postman collection passes under Newman against the compose API — 36
+  requests, 60 assertions — while the generator is still catching up. The seed is
   deterministic — two fresh backfills are identical, table by table (checked in step
   3) — so a local database regenerated with the current code has the same ids.
 - `invariants.sql`, run with `docker compose exec`, passes all twelve checks.
 - The panel logs in with the demo user from `.env.example`, and shows data.
 - `docker compose restart generator`: it resumes from `sim_state`, no gap, no repeat.
 - `docker compose down && docker compose up -d`: same data, `seed` skips.
-- `docker compose down -v && docker compose up -d`: a fresh dataset, same ids.
+- `docker compose down -v && docker compose up -d`: a fresh dataset, same ids — the
+  backfilled bets have the same fingerprint (md5 over id, player, stake, time) before and after.
 - The panel container cannot reach Postgres at all (`db` network only).
 
 ---

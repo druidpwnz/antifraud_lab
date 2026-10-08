@@ -214,8 +214,8 @@ The collection holds the API key on its **Authorization** tab and every request
 inherits it. `health` requests use **No Auth**, and *Wrong API key – 401* sets its own.
 
 Two collection variables pick the players: `playerId` (default 1) for the player
-pages, and `linkedPlayerId` (default 5, a player who shares a device on the seeded
-dataset) for *investigation*. *Linked players* fails on purpose if that player has
+pages, and `linkedPlayerId` (default 11, a player who shares a payment method on a fresh
+seed) for *investigation*. *Linked players* fails on purpose if that player has
 no links — an empty list would pass every other check without testing anything.
 
 Requests pass values along: *first page* saves the cursor *next page* uses;
