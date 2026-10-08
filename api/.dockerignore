@@ -1,0 +1,6 @@
+# An allowlist: only what the image copies. Tests, Postman files, .env and the
+# virtualenv never reach an image.
+*
+!requirements.txt
+!app/
+**/__pycache__

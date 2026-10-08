@@ -1,0 +1,8 @@
+# The build context for generator/Dockerfile is the repo root - which also holds
+# .venv, .env, .git and data. An allowlist: ignore everything, then let in only what
+# the image copies. A file added to the repo later stays out unless listed here.
+*
+!generator/requirements.txt
+!generator/*.py
+!db/migrate.py
+!db/migrations/

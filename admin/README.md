@@ -123,7 +123,8 @@ A bet page says out loud three things anyone could check from the numbers on it:
 
 This is not fraud detection — that is phase 9, in Prometheus. It is a few lines in
 `views/bets.py` over the API's own data, and it never reads `fraud_labels` (the panel
-cannot even reach it). On the generated data, bets 608, 134 and 1701 show one each.
+cannot even reach it). In a fresh dataset (`SEED = 42`, `DAYS = 14`), bets 103, 178
+and 649 show one each.
 
 ---
 

@@ -458,6 +458,11 @@ dev loop.
   live generator catches up to *now* before it slows down. On a fresh machine that is
   a month of simulated hours, a few minutes; months from now it is longer and the
   dataset bigger. Fine for now; `CATCH_UP=0` in `.env` skips it.
+- **A local database can be older than the code.** Step 3 found the local
+  `antifraud` differs from a fresh seed from the first days on: it was generated
+  before later generator tuning. Ids picked from it (example bets, Postman
+  variables) do not exist in a fresh dataset. Regenerate locally after generator
+  changes: `bash reset.sh && (cd generator && python backfill.py)`.
 - **The `docker` group is root.** Adding yourself to it means `docker` without `sudo`
   — and anything able to run `docker` can become root on the machine.
 
@@ -484,7 +489,9 @@ with phase 5.
 - [x] 2. Ready the code for containers: `DATABASE_URL` in the generator, requirements
       split into runtime and dev, `/health` on the panel, a re-runnable seed, and
       `db/migrate.py`
-- [ ] 3. Dockerfiles and `.dockerignore`; each image builds and starts
+- [x] 3. Dockerfiles and `.dockerignore`; each image builds and starts — run by hand
+      on a throwaway network: migrate, seed, live, API, panel; login through gunicorn's
+      two workers; every container stops in under a second on SIGTERM
 - [ ] 4. Compose, data half: `postgres`, `migrate`, `seed`, `generator` — and
       `invariants.sql` passes inside it
 - [ ] 5. Compose, web half: `api`, `admin`, networks, ports, healthchecks, `.env.example`
@@ -496,8 +503,9 @@ with phase 5.
 - From a fresh `git clone` in another folder — so nothing untracked can help:
   `cp .env.example .env && docker compose up -d`, then `docker compose ps` shows
   every long-running service healthy and `migrate` / `seed` exited 0.
-- The Postman collection passes under Newman against the compose API. The data is
-  seeded, so the same ids exist as locally.
+- The Postman collection passes under Newman against the compose API. The seed is
+  deterministic — two fresh backfills are identical, table by table (checked in step
+  3) — so a local database regenerated with the current code has the same ids.
 - `invariants.sql`, run with `docker compose exec`, passes all twelve checks.
 - The panel logs in with the demo user from `.env.example`, and shows data.
 - `docker compose restart generator`: it resumes from `sim_state`, no gap, no repeat.
