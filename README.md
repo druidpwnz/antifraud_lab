@@ -456,8 +456,22 @@ dev loop.
   published is decided in compose, nowhere else.
 - **The clock keeps moving.** The backfill ends on a fixed date (2026-09-01) and the
   live generator catches up to *now* before it slows down. On a fresh machine that is
-  a month of simulated hours, a few minutes; months from now it is longer and the
-  dataset bigger. Fine for now; `CATCH_UP=0` in `.env` skips it.
+  five weeks of simulated hours — about ten minutes in step 4, slower than expected
+  because each hour has more players than the last — and months from now it is
+  longer and the dataset bigger. The API and panel work while it catches up.
+  `CATCH_UP=0` in `.env` skips it.
+- **The first `up -d` waits for the seed.** The generator depends on the seed having
+  *finished*, so `docker compose up -d` only returns after the backfill — about
+  half a minute — not at once.
+- **A reboot ignores `depends_on`.** Docker restarts `unless-stopped` containers by
+  itself, in no particular order, and does not run `migrate` or `seed`. A generator
+  that starts before Postgres crashes and is restarted with a growing back-off until
+  Postgres is up — seen in step 4, and harmless: each simulated hour is one
+  transaction, so an interrupted hour is rolled back and redone.
+- **`exec` and a local file.** `docker compose exec postgres psql -f db/tests/…`
+  looks for the file *inside* the container. Feed it on stdin instead:
+  `docker compose exec -T postgres psql -U antifraud -d antifraud < db/tests/invariants.sql`
+  (`-T`: no terminal, so stdin can be a file).
 - **A local database can be older than the code.** Step 3 found the local
   `antifraud` differs from a fresh seed from the first days on: it was generated
   before later generator tuning. Ids picked from it (example bets, Postman
@@ -492,8 +506,10 @@ with phase 5.
 - [x] 3. Dockerfiles and `.dockerignore`; each image builds and starts — run by hand
       on a throwaway network: migrate, seed, live, API, panel; login through gunicorn's
       two workers; every container stops in under a second on SIGTERM
-- [ ] 4. Compose, data half: `postgres`, `migrate`, `seed`, `generator` — and
-      `invariants.sql` passes inside it
+- [x] 4. Compose, data half: `postgres`, `migrate`, `seed`, `generator` — and
+      `invariants.sql` passes inside it. Also checked: restart resumes with no gap,
+      `down`/`up` keeps the data and the seed skips, the `db` network has no way out,
+      and the generator survives Postgres disappearing under it
 - [ ] 5. Compose, web half: `api`, `admin`, networks, ports, healthchecks, `.env.example`
 - [ ] 6. Proof on a clean clone
 - [ ] 7. Docs: a quick start at the top of this README, this section, the service READMEs

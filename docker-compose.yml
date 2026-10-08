@@ -1,0 +1,115 @@
+# The whole lab:    cp .env.example .env && docker compose up -d
+#
+# Start-up order - each step waits for the one before to have finished, not just
+# started:
+#     postgres (healthy) -> migrate (exited 0) -> seed (exited 0) -> generator
+#
+#     docker compose ps                      what is running, and is it healthy
+#     docker compose logs -f generator       follow one service
+#     docker compose down                    stop everything, KEEP the data
+#     docker compose down -v                 stop everything, DELETE the data
+
+# A fixed project name: containers, the network and the volume are called
+# antifraud-..., whatever folder the repo was cloned into.
+name: antifraud
+
+# --- shared pieces ("x-" keys are ignored by compose; the &names are YAML anchors,
+#     pasted in below with *name or <<: *name) ---------------------------------
+
+# Docker keeps container logs forever by default. Cap them at 3 x 10 MB each.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+# How every Python service reaches Postgres. DATABASE_URL is empty on purpose: libpq
+# then takes everything from the PG* variables - no password inside a URL.
+x-db-env: &db-env
+  DATABASE_URL: ""
+  PGHOST: postgres
+  PGUSER: ${POSTGRES_USER:?set POSTGRES_USER in .env - cp .env.example .env}
+  PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env - cp .env.example .env}
+  PGDATABASE: ${POSTGRES_DB:?set POSTGRES_DB in .env - cp .env.example .env}
+
+# migrate, seed and generator are the same image doing three jobs.
+x-generator-image: &generator-image
+  build:
+    context: .
+    dockerfile: generator/Dockerfile
+  image: antifraud/generator
+  networks: [db]
+  logging: *logging
+
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env - cp .env.example .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env - cp .env.example .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env - cp .env.example .env}
+    volumes:
+      # postgres:18 keeps its data under /var/lib/postgresql/18/docker and wants the
+      # volume one level up - not at /var/lib/postgresql/data like older versions.
+      - pgdata:/var/lib/postgresql
+    # Docker's default /dev/shm is 64 MB; Postgres uses it for parallel queries.
+    shm_size: 256mb
+    healthcheck:
+      # -h 127.0.0.1, over TCP: on the very first start the image runs a temporary,
+      # socket-only server while it creates the database, and pg_isready over the
+      # socket already says "ready" then. Only the real server listens on TCP.
+      # $$ is a literal $ - the variable is the container's, read when the check runs.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+      start_interval: 1s      # checked every second while starting, every 10 s after
+    restart: unless-stopped
+    networks: [db]
+    logging: *logging
+
+  # Applies the migrations the database does not have yet, then exits.
+  migrate:
+    <<: *generator-image
+    command: ["python", "/app/db/migrate.py"]
+    environment: *db-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"             # a one-shot: restarting it would run it forever
+
+  # 14 days of history - only into an empty database; afterwards it says
+  # "already seeded" and exits 0 in a second (see generator/backfill.py).
+  seed:
+    <<: *generator-image
+    command: ["python", "backfill.py"]
+    environment: *db-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
+  # The live generator: carries on from sim_state, one simulated hour at a time.
+  generator:
+    <<: *generator-image
+    environment:
+      <<: *db-env
+      REAL_SECONDS_PER_SIM_HOUR: ${REAL_SECONDS_PER_SIM_HOUR:-12}
+      CATCH_UP: ${CATCH_UP:-1}
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    # On SIGTERM live.py finishes the hour in progress and commits; give it time
+    # before Docker sends SIGKILL (the default wait is 10 s).
+    stop_grace_period: 30s
+
+networks:
+  # internal: no route out of this network - Postgres and the generator need
+  # nothing from the internet, and nothing outside can reach in.
+  db:
+    internal: true
+
+volumes:
+  pgdata:
