@@ -39,7 +39,7 @@ login_manager = LoginManager()
 csrf = CSRFProtect()
 
 # Pages anyone may open. Everything else needs a login.
-PUBLIC_ENDPOINTS = {"auth.login", "static"}
+PUBLIC_ENDPOINTS = {"auth.login", "static", "home.health"}
 
 # Checked against when the username does not exist, so a wrong username takes as long
 # as a wrong password. Otherwise the response time tells an attacker which usernames

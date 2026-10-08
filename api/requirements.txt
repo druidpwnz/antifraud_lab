@@ -1,9 +1,6 @@
+# What the API needs to run - this is what the image installs.
 # Pinned to the minor versions this was built and tested with.
 fastapi==0.141.*
 uvicorn[standard]==0.54.*
 psycopg[binary]==3.3.*
 psycopg-pool==3.3.*
-
-# tests
-pytest==9.1.*
-httpx2==2.13.*          # what FastAPI's TestClient uses; plain httpx is deprecated for it

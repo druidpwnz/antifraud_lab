@@ -1,0 +1,36 @@
+# db
+
+| Path | What it is |
+|---|---|
+| `migrations/` | The schema, one numbered `.sql` file per change |
+| `migrate.py` | Applies the migrations a database does not have yet |
+| `tests/` | SQL checks on the data — see [its README](tests/README.md) |
+
+## Migrations
+
+```bash
+python db/migrate.py                                    # antifraud
+DATABASE_URL="dbname=antifraud_test" python db/migrate.py
+```
+
+Run with the venv active. Each file runs once, in filename order, in its own
+transaction, and is recorded in the `schema_migrations` table — so running it again
+applies only what is new. A failing file rolls back completely and stops the run.
+`reset.sh` and the compose stack's `migrate` service both use this script.
+
+**Adding one:** a new file with the next number, `005_what_it_does.sql`, starting
+with `SET TIME ZONE 'UTC';` like the others — a `timestamptz` literal in a migration
+is read in the session's time zone, so without it the same file means different
+moments on different machines. Never edit a file once it has been applied anywhere:
+the runner only knows filenames, so an edit would not reach databases that already
+ran it. Fix forward, in a new file.
+
+**A database migrated by hand** — with `psql`, before this script existed, like a
+local `antifraud` from before phase 8 — has the tables but no `schema_migrations`.
+The runner refuses to touch it rather than re-run `001`. If every file has been
+applied to it, record them once without running anything:
+
+```bash
+python db/migrate.py --baseline
+DATABASE_URL="dbname=antifraud_test" python db/migrate.py --baseline
+```

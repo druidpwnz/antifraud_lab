@@ -16,11 +16,10 @@ From the repo root, once:
 
 ```bash
 source .venv/bin/activate
-pip install -r api/requirements.txt
+pip install -r api/requirements-dev.txt     # requirements.txt alone is what the image installs
 
 # an existing database: apply the migrations it does not have yet, keep the data
-psql antifraud -v ON_ERROR_STOP=1 --single-transaction -f db/migrations/003_risk_checks.sql
-psql antifraud -v ON_ERROR_STOP=1 --single-transaction -f db/migrations/004_events_kickoff_order.sql
+python db/migrate.py          # first time on a database migrated by hand: see db/README.md
 # (a fresh one: bash reset.sh && python generator/backfill.py - reset.sh DROPS the database)
 
 cp api/.env.example api/.env        # DATABASE_URL, API_KEYS, API_READ_KEYS, POOL_MIN, POOL_MAX

@@ -20,7 +20,7 @@ From the repo root, once:
 
 ```bash
 source .venv/bin/activate
-pip install -r admin/requirements.txt
+pip install -r admin/requirements-dev.txt   # requirements.txt alone is what the image installs
 cp admin/.env.example admin/.env
 ```
 
@@ -98,6 +98,7 @@ errors.
 | Page | What it shows | API calls |
 |---|---|---|
 | `/` | API status card, refreshed every 30 s | `/ready`, `/v1/players?limit=1` |
+| `/health` | `{"status": "ok"}` — no login, no API call. For Docker's healthcheck: an API outage must not get the panel restarted | none |
 | `/players` | Players, newest first. Filters: country, status, order. "Player ID" box | `GET /v1/players` |
 | `/players/5` | Status, country, currency; balance and its four parts; tabs | `/v1/players/5`, `/balance` |
 | `/players/5?tab=transactions` | Deposits and withdrawals, method and last four digits | `/transactions?order=desc` |
@@ -281,7 +282,8 @@ browser never does this.
 
 ```
 admin/
-  requirements.txt     flask, flask-login, flask-wtf, httpx, python-dotenv, pytest
+  requirements.txt     what it needs to run: flask, flask-login, flask-wtf, httpx, python-dotenv, gunicorn
+  requirements-dev.txt that, plus pytest - what the venv installs
   .env.example         API_URL, API_KEY, SECRET_KEY, API_TIMEOUT, ADMIN_USERS, SESSION_HOURS, SECURE_COOKIES
   app/
     __init__.py        create_app(): config, API client, login, blueprints, error pages, security headers

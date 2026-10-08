@@ -1,0 +1,4 @@
+# Running it, plus testing it - this is what the venv installs.
+-r requirements.txt
+
+pytest==9.1.*

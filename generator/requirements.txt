@@ -1,0 +1,2 @@
+# Pinned to the minor version this was built and tested with.
+psycopg[binary]==3.3.*

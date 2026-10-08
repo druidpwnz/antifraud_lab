@@ -1,8 +1,13 @@
 # all numbers and lists in one place
 
+import os
 from datetime import datetime, timezone
 
-DSN = "dbname=antifraud"
+# libpq connection string. Unset: the local database, as before. In a container,
+# compose sets DATABASE_URL="" and passes PGHOST, PGUSER, PGPASSWORD, PGDATABASE -
+# an empty string makes libpq take everything from those, so no password ever sits
+# inside a URL.
+DSN = os.environ.get("DATABASE_URL", "dbname=antifraud")
 SEED = 42
 
 # The simulation ends at a FIXED moment, never datetime.now().

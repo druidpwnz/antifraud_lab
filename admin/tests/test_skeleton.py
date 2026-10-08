@@ -188,3 +188,15 @@ def test_an_error_that_is_not_json_still_becomes_an_api_error():
 
     assert caught.value.status == 502
     assert caught.value.title == "Bad Gateway"
+
+
+def test_health_needs_no_login_and_no_api(make_client):
+    # Docker polls it. An API outage must not make the panel look unhealthy - the
+    # panel would be restarted for a problem that is not its own.
+    client = make_client({"/ready": httpx.ConnectError("refused")}, logged_in=False)
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"status": "ok"}
+    assert client.transport.seen == []
+    assert "Content-Security-Policy" in response.headers

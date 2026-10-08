@@ -1,4 +1,4 @@
-"""The home page, and the API status card it polls."""
+"""The home page, the API status card it polls, and the container healthcheck."""
 
 from flask import Blueprint, current_app, render_template
 
@@ -10,6 +10,17 @@ bp = Blueprint("home", __name__)
 @bp.get("/")
 def index():
     return render_template("home.html")
+
+
+@bp.get("/health")
+def health():
+    """Is the panel process up and serving? For Docker's healthcheck.
+
+    No login, and deliberately no API call: an API outage must not make Docker mark
+    the panel unhealthy and restart it - the panel is fine, and already shows a
+    friendly "API unavailable" page. Whether the API is up is /status's question.
+    """
+    return {"status": "ok"}
 
 
 @bp.get("/status")

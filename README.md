@@ -21,7 +21,7 @@ Advanced SQL is no longer the target — the rules layer stays deliberately thin
 | 5 | Thin alerting (fills `alerts`) | **postponed** — after the API |
 | 6 | API — FastAPI | **done** — 15 endpoints, 140 tests, Postman collection |
 | 7 | Admin panel — Flask + Jinja + HTMX, over the API | **done** — players, bets, events; 140 tests |
-| 8 | Compose, for real | **next** |
+| 8 | Compose, for real | **next** — planned |
 | 9 | Grafana + Prometheus — fraud alerting | not started |
 | 10 | CI/CD — GitHub Actions | not started |
 
@@ -332,7 +332,8 @@ Deliberately read-only. Running risk checks and a review queue are left for late
 
 ```
 admin/
-  requirements.txt      flask, flask-login, flask-wtf, httpx, python-dotenv, pytest
+  requirements.txt      flask, flask-login, flask-wtf, httpx, python-dotenv, gunicorn
+  requirements-dev.txt  that, plus pytest
   .env.example          API_URL, API_KEY (a read key), SECRET_KEY, ADMIN_USERS
   app/
     __init__.py         create_app()
@@ -397,20 +398,112 @@ Run with `flask --app app run --port 5000 --debug` from `admin/`.
 
 ---
 
-## Phase 8 — Compose, for real
+## Phase 8 — Compose, for real (next)
 
-`docker-compose.yml` has been empty since day one, and by now there are four
-services that need to talk to each other.
+**The goal:** on any machine with Docker, a fresh clone comes up with one copy and
+one command, and nothing else installed — no Python, no Postgres:
 
-- [ ] `postgres`, `generator` (live mode), `rules-runner`, `api`, `admin`,
-      `grafana`, `prometheus`
-- [ ] One bridge network, Postgres on a named volume
-- [ ] Publish only the API, the admin panel and Grafana to the LAN — the panel
-      needs the API on the internal network, never Postgres
-- [ ] Healthcheck on Postgres, `depends_on: condition: service_healthy` — a plain
-      `depends_on` does not wait for the database to accept connections
-- [ ] Migrations applied by an entrypoint, not by hand
-- [ ] `.env` for credentials and simulation knobs, `.env.example` committed
+```bash
+git clone https://github.com/druidpwnz/antifraud_lab && cd antifraud_lab
+cp .env.example .env
+docker compose up -d
+```
+
+A few minutes later the database is created and migrated, 14 days of history are
+generated, the live generator is ticking, and the API (`:8000`) and the panel
+(`:5000`) answer on the LAN. `docker compose down` stops it and keeps the data;
+`docker compose down -v` throws the data away, like `reset.sh` + backfill.
+
+Local development stays as it is — venv, local Postgres, `flask run`, `uvicorn
+--reload`. Compose is how the whole thing *runs*; nothing in it replaces the
+dev loop.
+
+### Decisions
+
+| Topic | Decision | Why |
+|---|---|---|
+| Engine | Docker Engine + the Compose plugin (`docker compose`), Podman removed from this machine | The same tool GitHub Actions runs in phase 10. The compose file stays standard, so Podman could still read it elsewhere |
+| Config | Root `.env.example` committed, filled with working demo values; `.env` uncommitted. Required values are `${VAR:?…}` in compose, so a missing one stops `up` with a message instead of starting half-configured | One copy step is the whole setup, and real secrets are never in git |
+| Database user | One user, the owner, shared by the generator and the API — as locally | Simplest; a separate limited role for the API can come later |
+| Connection settings | Services get `PGHOST`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`; libpq reads them by itself | No password inside a URL, so a password with `@` or `/` cannot break it. The generator's hard-coded `dbname=antifraud` becomes `DATABASE_URL` from env, defaulting to today's value |
+| Images | One per Python service, built from this repo: `python:3.14-slim`, non-root user, runtime requirements only, `.dockerignore` | Small, and the same images phase 10 pushes to `ghcr.io` |
+| One generator image, three jobs | `migrate`, `seed` and `generator` all run the generator image with a different command | They all need Python + psycopg + this repo's SQL; three images would be three copies |
+| Start-up order | `postgres` healthy → `migrate` completes → `seed` completes → `generator`; the API waits for `migrate`; the panel waits for a healthy API | `depends_on` with `service_healthy` / `service_completed_successfully` — a plain `depends_on` only waits for a container to *start*, not for Postgres to accept connections |
+| Migrations | `db/migrate.py`: applies each `db/migrations/*.sql` not yet recorded in a `schema_migrations` table, in order, one transaction each | Postgres's `/docker-entrypoint-initdb.d` only runs on an *empty* volume — migration 005 would never reach an existing one |
+| Seeding | `seed` runs the backfill only when `sim_state` is empty, and exits 0 when it is already done | `up` after `down` must not fail or regenerate. Players present but no `sim_state` means a backfill died half-way: `seed` fails loudly and says to run `down -v` |
+| Panel server | gunicorn, not `flask run` (a development server) | With several workers, `SECRET_KEY` *must* be fixed: a random key per worker would make every other request look logged out — another reason it is required |
+| Networks | `db`: postgres, migrate, seed, generator, api. `web`: api, admin | The panel is not on the database network at all, so decision 2 — the panel never touches Postgres — is enforced by the network, not just by the code |
+| Ports | Publish only the API and the panel, ports set in `.env`. Postgres is not published; `docker compose exec postgres psql` instead | Nothing on the LAN can reach the database |
+| Postgres | `postgres:18` (as locally), named volume, healthcheck `pg_isready` | — |
+| Health | `pg_isready`; the API's `/ready` (Python's urllib — the slim image has no curl); a new `/health` on the panel that needs no login and no API | Compose waits on these, and `docker compose ps` shows them |
+| Stopping | Exec-form `CMD` so Python is PID 1 and gets SIGTERM; `stop_grace_period` long enough for the generator to finish its hour | `live.py` already finishes the hour and commits on SIGTERM — this lets it |
+| Restarts | `unless-stopped` for long-running services, none for `migrate` and `seed` | A one-shot that restarts would run forever |
+
+### Traps to plan for
+
+- **postgres:18 moved its data directory.** The volume mounts at
+  `/var/lib/postgresql`, not `/var/lib/postgresql/data` as in every older guide;
+  mounted the old way, the data is not where the volume is.
+- **`pg_isready` says ready too early.** On the first start the image runs a
+  temporary server, socket only, to create the database — and `pg_isready` over the
+  socket is happy with it, before the database exists (seen in step 2). The
+  healthcheck asks over TCP, `pg_isready -h 127.0.0.1`, which only the real server
+  answers.
+- **`$` in `.env`.** Compose expands `$name` in `.env` values, and a password hash
+  is full of `$`. `ADMIN_USERS` goes in single quotes, which compose leaves alone.
+- **Docker publishes ports past firewalld.** It writes its own firewall rules, so a
+  published port is reachable from the LAN whatever the firewalld zone says. What is
+  published is decided in compose, nowhere else.
+- **The clock keeps moving.** The backfill ends on a fixed date (2026-09-01) and the
+  live generator catches up to *now* before it slows down. On a fresh machine that is
+  a month of simulated hours, a few minutes; months from now it is longer and the
+  dataset bigger. Fine for now; `CATCH_UP=0` in `.env` skips it.
+- **The `docker` group is root.** Adding yourself to it means `docker` without `sudo`
+  — and anything able to run `docker` can become root on the machine.
+
+### Layout
+
+```
+docker-compose.yml        postgres, migrate, seed, generator, api, admin
+.env.example              every variable compose uses, with demo values
+db/migrate.py             the migration runner
+generator/Dockerfile      also runs migrate and seed
+generator/requirements.txt
+api/Dockerfile
+admin/Dockerfile
+*/requirements-dev.txt    runtime requirements + pytest - what the venv installs
+.dockerignore
+```
+
+Phase 9 adds `prometheus` and `grafana` to the same file; the rules runner comes
+with phase 5.
+
+### Build order — one step at a time, reviewed before the next
+
+- [x] 1. Install Docker Engine + the Compose plugin, remove Podman — Docker 29.8, Compose 5.6
+- [x] 2. Ready the code for containers: `DATABASE_URL` in the generator, requirements
+      split into runtime and dev, `/health` on the panel, a re-runnable seed, and
+      `db/migrate.py`
+- [ ] 3. Dockerfiles and `.dockerignore`; each image builds and starts
+- [ ] 4. Compose, data half: `postgres`, `migrate`, `seed`, `generator` — and
+      `invariants.sql` passes inside it
+- [ ] 5. Compose, web half: `api`, `admin`, networks, ports, healthchecks, `.env.example`
+- [ ] 6. Proof on a clean clone
+- [ ] 7. Docs: a quick start at the top of this README, this section, the service READMEs
+
+### Proof it works
+
+- From a fresh `git clone` in another folder — so nothing untracked can help:
+  `cp .env.example .env && docker compose up -d`, then `docker compose ps` shows
+  every long-running service healthy and `migrate` / `seed` exited 0.
+- The Postman collection passes under Newman against the compose API. The data is
+  seeded, so the same ids exist as locally.
+- `invariants.sql`, run with `docker compose exec`, passes all twelve checks.
+- The panel logs in with the demo user from `.env.example`, and shows data.
+- `docker compose restart generator`: it resumes from `sim_state`, no gap, no repeat.
+- `docker compose down && docker compose up -d`: same data, `seed` skips.
+- `docker compose down -v && docker compose up -d`: a fresh dataset, same ids.
+- The panel container cannot reach Postgres at all (`db` network only).
 
 ---
 
