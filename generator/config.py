@@ -139,5 +139,7 @@ ESCALATION_MULTIPLE = (10, 40)      # how many average stakes the big bet is
 # Read from the environment so a container can change them without a rebuild;
 # these are the defaults when the variable is not set.
 
-REAL_SECONDS_PER_SIM_HOUR = 12      # 3600 = real time, 12 = one sim day per 5 minutes
-CATCH_UP = True                     # run flat out until the sim clock reaches now
+# Never ahead of the real clock: once caught up, each hour is written when it has
+# ended in the real world. These two only decide how it gets there.
+CATCH_UP = True                     # behind: run flat out until the sim clock reaches now
+REAL_SECONDS_PER_SIM_HOUR = 12      # behind with CATCH_UP off: 12 = one sim day per 5 minutes
