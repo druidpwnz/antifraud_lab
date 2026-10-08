@@ -477,6 +477,14 @@ dev loop.
   before later generator tuning. Ids picked from it (example bets, Postman
   variables) do not exist in a fresh dataset. Regenerate locally after generator
   changes: `bash reset.sh && (cd generator && python backfill.py)`.
+- **An old `.env` after an update.** `.env` is a copy, so it does not get the
+  variables a newer `.env.example` adds — and every `${VAR:?}` then stops compose,
+  even `docker compose ps`, naming the missing variable. Seen in step 5: copy it
+  again (or add the new lines by hand). The data is in the volume, not in `.env`,
+  so nothing is lost — as long as the `POSTGRES_*` values stay the same.
+- **`hash-password` needs a terminal.** It asks for the password twice, hidden.
+  `docker compose exec admin flask --app app hash-password <name>` gives it one;
+  with `-T` or a pipe it aborts unless both lines come on stdin.
 - **The `docker` group is root.** Adding yourself to it means `docker` without `sudo`
   — and anything able to run `docker` can become root on the machine.
 
@@ -510,7 +518,12 @@ with phase 5.
       `invariants.sql` passes inside it. Also checked: restart resumes with no gap,
       `down`/`up` keeps the data and the seed skips, the `db` network has no way out,
       and the generator survives Postgres disappearing under it
-- [ ] 5. Compose, web half: `api`, `admin`, networks, ports, healthchecks, `.env.example`
+- [x] 5. Compose, web half: `api`, `admin`, networks, ports, healthchecks, `.env.example`
+      — the API and the panel are healthy before the seed has finished; the panel's
+      key is added to the API's read keys by compose, so they cannot drift apart
+      (it reads, and a POST with it is 403); login holds across gunicorn's two
+      workers; the panel container cannot even resolve `postgres`; with Postgres
+      stopped `/ready` is 503 and the panel 503, and both recover by themselves
 - [ ] 6. Proof on a clean clone
 - [ ] 7. Docs: a quick start at the top of this README, this section, the service READMEs
 
