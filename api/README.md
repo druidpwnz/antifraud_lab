@@ -12,6 +12,26 @@ endpoint does, and how to use the Postman collection.
 
 ## Run it
 
+### With Docker
+
+The whole lab — database, generator, API, panel — from the repo root:
+
+```bash
+cp .env.example .env
+docker compose up -d
+```
+
+http://localhost:8000/docs, **Authorize** with `demo-full-key-change-me` (`API_KEYS`
+in `.env`) or `demo-read-key-change-me` (`API_READ_KEYS`). The API answers as soon
+as the database is migrated, even while the history is still being generated.
+
+```bash
+docker compose logs -f api           # the access log
+docker compose up -d --build api     # after a code change: rebuild and replace it
+```
+
+### Without Docker, for development
+
 From the repo root, once:
 
 ```bash
@@ -256,7 +276,18 @@ npx newman run api/postman/antifraud.postman_collection.json \
 ```
 
 Same collection, same checks, no account, no run limit, and a non-zero exit code on
-any failure — which is what CI will use.
+any failure — which is what CI will use. Against the Docker stack, the keys are the
+ones in the root `.env`:
+
+```bash
+npx newman run api/postman/antifraud.postman_collection.json \
+    -e api/postman/local.postman_environment.json \
+    --env-var apiKey=demo-full-key-change-me \
+    --env-var readApiKey=demo-read-key-change-me
+```
+
+The collection's default ids (`playerId` 1, `linkedPlayerId` 11) are right for a
+fresh seed — compose's, or a local `reset.sh` + backfill with the current code.
 
 ---
 

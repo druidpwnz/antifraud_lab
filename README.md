@@ -9,11 +9,59 @@ Advanced SQL is no longer the target — the rules layer stays deliberately thin
 
 ---
 
+## Quick start
+
+Needs only Docker Engine with the Compose plugin — no Python, no Postgres:
+
+```bash
+git clone https://github.com/druidpwnz/antifraud_lab && cd antifraud_lab
+cp .env.example .env
+docker compose up -d
+```
+
+The first `up` builds three images and generates 14 days of history, about a
+minute. Then the live generator catches up from 2026-09-01 to *now* — about ten
+minutes, longer the later it is — and after that writes each simulated hour just
+after it ends in real time.
+
+| What | Where | Login |
+|---|---|---|
+| Admin panel | http://localhost:5000 | `admin` / `demo-admin-password-change-me` |
+| API, interactive docs | http://localhost:8000/docs | **Authorize** with `demo-full-key-change-me` |
+| Database | `docker compose exec postgres psql -U antifraud -d antifraud` | — |
+
+From another machine on the LAN, use this machine's address instead of `localhost`.
+
+```bash
+docker compose ps                    # everything Up / healthy; migrate and seed Exited (0)
+docker compose logs -f generator     # watch it catch up
+docker compose down                  # stop, KEEP the data
+docker compose down -v               # stop and DELETE the data - the next up starts fresh
+git pull && docker compose up -d --build     # after an update
+```
+
+**Before anyone but you can reach it,** change the passwords and keys in `.env` —
+the demo values are public, in this repo. Do it before the first `up`:
+`POSTGRES_PASSWORD` is only used when the database is created, so changing it later
+does nothing until `down -v`. A new panel user:
+`docker compose exec admin flask --app app hash-password <name>`, the printed line
+into `ADMIN_USERS` (in single quotes), then `docker compose up -d`.
+
+**After `git pull`,** compare `.env.example` with your `.env`
+(`diff .env.example .env`): new variables are not copied over by themselves, and
+compose refuses to start without them.
+
+Developing without Docker — venv, local Postgres, `uvicorn --reload`, `flask run` —
+is in the service READMEs: [`api/`](api/README.md), [`admin/`](admin/README.md),
+[`db/`](db/README.md).
+
+---
+
 ## Status
 
 | Phase | What | State |
 |---|---|---|
-| 0 | Repo, skeleton, compose | **compose still empty** |
+| 0 | Repo, skeleton, compose | **done** — compose in phase 8 |
 | 1 | Schema — 14 tables + `sim_state` | **done** |
 | 2 | Backfill generator | **done** |
 | 3 | Fraud injector | **3 patterns done** |
@@ -21,7 +69,7 @@ Advanced SQL is no longer the target — the rules layer stays deliberately thin
 | 5 | Thin alerting (fills `alerts`) | **postponed** — after the API |
 | 6 | API — FastAPI | **done** — 15 endpoints, 140 tests, Postman collection |
 | 7 | Admin panel — Flask + Jinja + HTMX, over the API | **done** — players, bets, events; 140 tests |
-| 8 | Compose, for real | **next** — planned |
+| 8 | Compose, for real | **done** — one `docker compose up -d`, six services |
 | 9 | Grafana + Prometheus — fraud alerting | not started |
 | 10 | CI/CD — GitHub Actions | not started |
 
@@ -37,6 +85,8 @@ events, plus idempotent risk checks, with 140 tests and a Postman collection.
 The admin panel is in [`admin/`](admin/README.md): a read-only back office over the
 API — players with their money, logins and linked accounts, every bet, every match —
 with a login, 140 tests and the API key kept out of the browser.
+
+All of it runs with one `docker compose up -d` — see [Quick start](#quick-start).
 
 ---
 
@@ -404,7 +454,7 @@ Run with `flask --app app run --port 5000 --debug` from `admin/`.
 
 ---
 
-## Phase 8 — Compose, for real (next)
+## Phase 8 — Compose, for real (done)
 
 **The goal:** on any machine with Docker, a fresh clone comes up with one copy and
 one command, and nothing else installed — no Python, no Postgres:
@@ -423,6 +473,26 @@ generated, the live generator is ticking, and the API (`:8000`) and the panel
 Local development stays as it is — venv, local Postgres, `flask run`, `uvicorn
 --reload`. Compose is how the whole thing *runs*; nothing in it replaces the
 dev loop.
+
+### What runs
+
+| Service | Image | Runs | Networks | Published |
+|---|---|---|---|---|
+| `postgres` | `postgres:18` | always | `db` | — |
+| `migrate` | `antifraud/generator` | once per `up`, applies new migrations, exits | `db` | — |
+| `seed` | `antifraud/generator` | once per `up`; backfills only an empty database | `db` | — |
+| `generator` | `antifraud/generator` | always — the live generator | `db` | — |
+| `api` | `antifraud/api` | always, uvicorn | `db`, `web` | `API_PORT`, 8000 |
+| `admin` | `antifraud/admin` | always, gunicorn with 2 workers | `web` | `PANEL_PORT`, 5000 |
+
+```
+  ┌─ network db (internal: no way out) ──┐
+  │  postgres <── migrate, seed,         │
+  │     ^         generator              │
+  │     └──────── api ───────────────────┼── network web ── admin
+  └───────────────┼──────────────────────┘                    │
+                :8000                                       :5000
+```
 
 ### Decisions
 
@@ -499,6 +569,14 @@ dev loop.
   second copy beside the first, give it its own name and ports:
   `docker compose -p afproof up -d`, with `API_PORT` / `PANEL_PORT` changed in its
   `.env` (how step 6 ran).
+- **`POSTGRES_PASSWORD` only counts once.** The image uses it when it creates the
+  database, on an empty volume. Change it in `.env` afterwards and Postgres keeps
+  the old one while the services start sending the new one — every connection
+  fails. Set it before the first `up`; later, `down -v` (losing the data) or
+  `ALTER USER` in `psql` first.
+- **`restart` does not read `.env`.** `docker compose restart` restarts the same
+  container with the same settings; `docker compose up -d` is what notices a
+  changed `.env` and recreates just the services it affects.
 - **The `docker` group is root.** Adding yourself to it means `docker` without `sudo`
   — and anything able to run `docker` can become root on the machine.
 
@@ -542,7 +620,7 @@ with phase 5.
       clone built with `--no-cache --pull` (61 s to all healthy). Newman found the
       one thing a fresh dataset breaks: `linkedPlayerId` was 5, picked from the old
       local database, and player 5 has no links on a fresh seed — now 11
-- [ ] 7. Docs: a quick start at the top of this README, this section, the service READMEs
+- [x] 7. Docs: a quick start at the top of this README, this section, the service READMEs
 
 ### Proof it works
 
@@ -560,6 +638,22 @@ with phase 5.
 - `docker compose down -v && docker compose up -d`: a fresh dataset, same ids — the
   backfilled bets have the same fingerprint (md5 over id, player, stake, time) before and after.
 - The panel container cannot reach Postgres at all (`db` network only).
+
+### What was found by testing, not by planning
+
+- `pg_isready` over the socket said "ready" while the first-start temporary server
+  was still creating the database — the healthcheck asks over TCP (step 2).
+- The local database was older than the generator code, so ids picked from it were
+  wrong for a fresh seed; Newman caught `linkedPlayerId` (step 6).
+- **The live generator ran into the future.** Once caught up it carried on at 300×
+  real time; the panel showed bets settled five days ahead. It now waits for each
+  hour to end in the real world.
+- An `.env` copied before an update lacks the new variables, and compose refuses to
+  start at all — even `ps` (step 5).
+- A second clone on the same machine is the *same* project, because the name is
+  fixed — it would take over the first one's containers and data (step 6).
+- Catching up five weeks took about ten minutes, not two and a half: every hour has
+  more players than the last (step 4).
 
 ---
 

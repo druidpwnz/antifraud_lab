@@ -16,6 +16,33 @@ This file is how to run it, what every page does, and how the pieces fit.
 
 ## Run it
 
+### With Docker
+
+The whole lab from the repo root — the panel comes up with the API and the database:
+
+```bash
+cp .env.example .env
+docker compose up -d
+```
+
+http://localhost:5000, log in as `admin` / `demo-admin-password-change-me`. In
+Docker the panel runs under gunicorn with two workers, reaches the API at
+`http://api:8000`, and is not on the database network at all. Its settings are in
+the root `.env`: `PANEL_API_KEY` (always made a read-only key by compose),
+`SECRET_KEY`, `ADMIN_USERS`, `SESSION_HOURS`, `SECURE_COOKIES`.
+
+A new user:
+
+```bash
+docker compose exec admin flask --app app hash-password anna
+```
+
+Put the printed line into `ADMIN_USERS` in `.env` — **inside the single quotes**,
+comma-separated from the others; compose would read every `$` in a hash as a
+variable otherwise — then `docker compose up -d` (`restart` would not read `.env`).
+
+### Without Docker, for development
+
 From the repo root, once:
 
 ```bash
@@ -61,8 +88,10 @@ The same app, with three things different:
   sent over plain http. (With it on and plain http, login never sticks.)
 - A fixed `SECRET_KEY`. Without one the panel makes a random key at start-up and
   warns: every restart then logs everybody out.
-- A real WSGI server instead of `flask run`, which is a development server. That is
-  phase 8, with Compose.
+- A real WSGI server instead of `flask run`, which is a development server. The
+  Docker image runs gunicorn: `gunicorn --workers 2 "app:create_app()"`. With more
+  than one worker a fixed `SECRET_KEY` is a must, not a nicety — each worker would
+  make its own random key, and every other request would look logged out.
 
 Passwords are only ever stored as hashes, in the environment. Adding or removing a
 user is an edit to `ADMIN_USERS` and a restart; a removed user's session stops
@@ -100,11 +129,11 @@ errors.
 | `/` | API status card, refreshed every 30 s | `/ready`, `/v1/players?limit=1` |
 | `/health` | `{"status": "ok"}` — no login, no API call. For Docker's healthcheck: an API outage must not get the panel restarted | none |
 | `/players` | Players, newest first. Filters: country, status, order. "Player ID" box | `GET /v1/players` |
-| `/players/5` | Status, country, currency; balance and its four parts; tabs | `/v1/players/5`, `/balance` |
-| `/players/5?tab=transactions` | Deposits and withdrawals, method and last four digits | `/transactions?order=desc` |
-| `/players/5?tab=bets` | The player's bets, each linking to its bet page | `/bets?order=desc` |
-| `/players/5?tab=sessions` | Logins: IP, device, user agent | `/sessions?order=desc` |
-| `/players/5?tab=linked` | Other players sharing a device or a payment method | `/linked` |
+| `/players/11` | Status, country, currency; balance and its four parts; tabs | `/v1/players/11`, `/balance` |
+| `/players/11?tab=transactions` | Deposits and withdrawals, method and last four digits | `/transactions?order=desc` |
+| `/players/11?tab=bets` | The player's bets, each linking to its bet page | `/bets?order=desc` |
+| `/players/11?tab=sessions` | Logins: IP, device, user agent | `/sessions?order=desc` |
+| `/players/11?tab=linked` | Other players sharing a device or a payment method | `/linked` |
 | `/bets` | Every player's bets, newest first. Filters: status, minimum stake, order. "Bet ID" box | `GET /v1/bets` |
 | `/bets/900` | Stake, odds, result, payout; the legs and their matches; warnings | `GET /v1/bets/900` |
 | `/events` | Matches in kickoff order, upcoming by default. Filters: status, league, order | `GET /v1/events?sort=start_time` |
@@ -178,7 +207,7 @@ shift a page, so load more never repeats or skips a row.
 
 The server renders the tab bar *and* the active tab's table together, and htmx swaps
 both. So the server decides which tab is highlighted — no JavaScript for that. Each
-tab is a real link (`/players/5?tab=bets`), pushed into the address bar: Back,
+tab is a real link (`/players/11?tab=bets`), pushed into the address bar: Back,
 reload and bookmarks all land on the right tab. Switching tabs does not fetch the
 player or the balance again.
 

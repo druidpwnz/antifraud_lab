@@ -12,6 +12,17 @@ psql antifraud -v ON_ERROR_STOP=1 -f db/tests/constraints.sql     # must pass
 psql antifraud -P pager=off       -f db/tests/profile.sql > profile.txt
 ```
 
+Against the Docker stack, the file goes in on stdin — `-f` would look for it inside
+the container — and `-T` lets stdin be a file:
+
+```bash
+docker compose exec -T postgres psql -U antifraud -d antifraud -v ON_ERROR_STOP=1 < db/tests/invariants.sql
+docker compose exec -T postgres psql -U antifraud -d antifraud -v ON_ERROR_STOP=1 < db/tests/constraints.sql
+docker compose exec -T postgres psql -U antifraud -d antifraud -P pager=off < db/tests/profile.sql > profile.txt
+```
+
+`constraints.sql` ends in `ROLLBACK`, so it leaves nothing behind either way.
+
 `invariants.sql` and `constraints.sql` are the CI steps. `profile.sql` is for eyes:
 save it before changing the generator, save it again after, and diff.
 

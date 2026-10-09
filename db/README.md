@@ -6,6 +6,23 @@
 | `migrate.py` | Applies the migrations a database does not have yet |
 | `tests/` | SQL checks on the data — see [its README](tests/README.md) |
 
+## In Docker
+
+The `migrate` service runs `migrate.py` on every `docker compose up`, before
+anything else touches the database; `seed` then backfills, only if the database is
+empty. The data lives in the `antifraud_pgdata` volume: `docker compose down` keeps
+it, `docker compose down -v` deletes it — the Docker version of `reset.sh` +
+backfill.
+
+```bash
+docker compose exec postgres psql -U antifraud -d antifraud   # a psql prompt
+docker compose run --rm migrate                               # apply a new migration now
+```
+
+Postgres is not published to the host, so a local `psql` cannot reach it — `exec`
+goes in through Docker instead. The SQL checks in `tests/` run the same way; see
+[its README](tests/README.md).
+
 ## Migrations
 
 ```bash
