@@ -116,7 +116,7 @@ A bet timestamped after `events.start_time`, or priced against stale odds.
 returns after injection is either planted or a generator bug.
 
 **What the generator does.** `fraud.maybe_late_bets()` runs after normal betting.
-At `LATE_BET_RATE` (0.01 per active player per hour) a player backs a single
+At `LATE_BET_RATE` (0.01 per session) a player backs a single
 selection on a match that has already kicked off but is not over — priced at the
 last pre-match odds, because `move_odds` stops touching a selection once its match
 starts. That staleness is exactly what a late bettor is after.
@@ -149,16 +149,17 @@ ROWS BETWEEN 50 PRECEDING AND 1 PRECEDING)`.
 
 **What the generator does.** `fraud.maybe_stake_escalation()` needs a player with a
 real history (`ESCALATION_MIN_BETS`, 15 bets) *and* a balance worth emptying
-(`ESCALATION_MIN_MULTIPLE`, 8x their own average stake). Only about 6% of active
-player-hours qualify, which is why `STAKE_ESCALATION_RATE` is 0.10 — far higher than
+(`ESCALATION_MIN_MULTIPLE`, 8x their own average stake). Only a few percent of
+sessions qualify, which is why `STAKE_ESCALATION_RATE` is 0.10 — far higher than
 the other patterns, for a comparable number of plants. The bet is a single, staked at
 10-40x the player's running average, capped by the balance.
 
 **Labels.** `entity_type = 'bet'`, `details` carries `average_stake`, `stake`,
 `multiple_of_average` and `bets_before`.
 
-**The point of this one.** At 14 days, 17 of the 26 planted bets are *smaller* than
-the 20th biggest honest bet in the database. An absolute threshold ("flag stakes over
+**The point of this one.** At 14 days, 40 of the 51 planted bets are *smaller* than
+the 20th biggest honest bet in the database (455.69; measured again after the
+5-minute ticks — it was 17 of 26 with hourly steps). An absolute threshold ("flag stakes over
 500") cannot separate them from honest high-rollers at any level. Only a per-player
 comparison can - which is exactly what the window function in the stake-anomaly rule
 is for:

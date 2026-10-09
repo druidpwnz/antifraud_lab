@@ -144,7 +144,7 @@ SETTLEMENT_ERROR_OFFSET = (0.05, 0.40)   # how far off the payout is, as a share
 LATE_BET_RATE = 0.01                # chance per session
 
 # Account takeover shape: a long history of small bets, then one huge one.
-# Only ~6% of sessions are eligible (needs a betting history AND a balance worth
+# Only a few percent of sessions are eligible (needs a betting history AND a balance worth
 # emptying), so this rate is much higher than the other patterns' to land a
 # comparable number of plants.
 STAKE_ESCALATION_RATE = 0.10        # chance per eligible session

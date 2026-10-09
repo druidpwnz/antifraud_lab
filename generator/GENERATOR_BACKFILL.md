@@ -1,5 +1,18 @@
 # Backfill Generator — Build Plan
 
+> **This is the original build plan, written for hourly steps.** The generator now
+> moves in 5-minute ticks — see "5-minute ticks" in the main [README](../README.md).
+> The ideas below still hold; the names changed:
+>
+> | Here | Now |
+> |---|---|
+> | the main loop, hour by hour | `tick.one_tick()`, `config.TICK_MINUTES` (5) at a time — backfill and live run the same function |
+> | `random_time_in_hour()` | `helpers.random_time_in_tick()` |
+> | `how_many(per_hour, dt)` — things per hour | the same rate per hour, scaled to one tick |
+> | a login chance per hour | `helpers.per_tick()` turns it into the chance per tick |
+> | a session lasts until the end of the hour | a session starts anywhere in its tick and is over by the end of the next one; actions are `ACTION_GAP_SECONDS` apart |
+> | settle every hour | settle in a tick that finished a match |
+
 Simple, junior-friendly version: plain functions, one main loop, lists and dicts in
 memory, no classes needed. Every step ends with a SQL query to check the work before
 moving on.

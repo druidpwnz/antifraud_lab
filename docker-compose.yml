@@ -94,7 +94,7 @@ services:
         condition: service_completed_successfully
     restart: "no"
 
-  # The live generator: carries on from sim_state, one simulated hour at a time.
+  # The live generator: carries on from sim_state, five simulated minutes at a time.
   generator:
     <<: *generator-image
     environment:
@@ -105,7 +105,7 @@ services:
       seed:
         condition: service_completed_successfully
     restart: unless-stopped
-    # On SIGTERM live.py finishes the hour in progress and commits; give it time
+    # On SIGTERM live.py finishes the step in progress and commits; give it time
     # before Docker sends SIGKILL (the default wait is 10 s).
     stop_grace_period: 30s
 

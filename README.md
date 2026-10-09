@@ -20,9 +20,9 @@ docker compose up -d
 ```
 
 The first `up` builds three images and generates 14 days of history, about a
-minute. Then the live generator catches up from 2026-09-01 to *now* — about ten
-minutes, longer the later it is — and after that writes each simulated hour just
-after it ends in real time.
+minute. Then the live generator catches up from 2026-09-01 to *now* — about eight
+minutes, longer the later it is — and after that writes new data every five
+minutes, never ahead of the real clock.
 
 | What | Where | Login |
 |---|---|---|
@@ -162,12 +162,13 @@ REAL_SECONDS_PER_SIM_HOUR=12   # behind, with CATCH_UP=0: one sim day per 5 minu
       **Never ahead of the real clock** — found in phase 8, when the panel showed
       bets settled five days in the future: once caught up, the loop went on at
       12 s per simulated hour, 300× real time, and nothing stopped it at *now*.
-      Now an hour is generated only once it has ended in the real world, so after
-      the catch-up the data arrives an hour at a time, just after each full hour.
+      Now a step is generated only once it has ended in the real world.
 
-      Steps in whole simulated hours rather than the 5-minute ticks originally
-      planned — that way live and backfill share `tick.one_hour()` exactly, instead of
-      two loops that could drift apart.
+      Steps first went in whole simulated hours rather than the 5-minute ticks
+      originally planned — that way live and backfill shared `tick.one_hour()`
+      exactly, instead of two loops that could drift apart. Once the generator
+      stopped at *now*, that meant a block of data once an hour, so the 5-minute
+      ticks came back after all, still one function for both — see below.
 
 - [x] Rebuild in-memory state from the database at startup — `state.load()`. Verified
       against the backfill's own in-memory state: 1526 players, zero mismatches on
@@ -176,7 +177,7 @@ REAL_SECONDS_PER_SIM_HOUR=12   # behind, with CATCH_UP=0: one sim day per 5 minu
       either in a table or derivable from (seed, row id). Archetypes, event goal
       probabilities and withdrawal due times are all derived; nothing lives only in
       a Python variable
-- [x] Graceful shutdown (SIGTERM/SIGINT): finishes the hour, commits, exits
+- [x] Graceful shutdown (SIGTERM/SIGINT): finishes the tick, commits, exits
 - [ ] Structured logging (plain prints for now)
 - [ ] Prometheus counters: rows written per second, sim lag behind wall clock
 
@@ -185,7 +186,7 @@ either side of `sim_state.sim_time`. Run `db/tests/invariants.sql` after the liv
 generator has been going for a while — every check must still pass. (Done: it does,
 across 134k bets written by two processes.)
 
-### 5-minute ticks (next)
+### 5-minute ticks (done)
 
 **The problem:** the live generator may not write the future, so it writes each
 simulated hour once that hour has ended — and the panel, and phase 9's graphs, get a
@@ -274,8 +275,11 @@ player's half-finished session would have to survive between ticks and restarts)
       assertions, 0 failed. The API and panel test suites do not depend on generated
       data — the API's write their own rows into `antifraud_test`, the panel's mock
       the API — so they cannot change
-- [ ] 6. Docs: this section, `GENERATOR_BACKFILL.md`, `FRAUD_PATTERNS.md`, the
-      comments in `config.py` and `.env.example`
+- [x] 6. Docs: this section, `GENERATOR_BACKFILL.md` (a note on top: it is the
+      original hourly build plan), `FRAUD_PATTERNS.md` (rates per session, the stake
+      escalation numbers measured again: 40 of 51 plants are smaller than the 20th
+      biggest honest bet), the quick start, the comments in `docker-compose.yml`
+      and `.env.example`
 
 ---
 
@@ -604,7 +608,7 @@ dev loop.
 | Ports | Publish only the API and the panel, ports set in `.env`. Postgres is not published; `docker compose exec postgres psql` instead | Nothing on the LAN can reach the database |
 | Postgres | `postgres:18` (as locally), named volume, healthcheck `pg_isready` | — |
 | Health | `pg_isready`; the API's `/ready` (Python's urllib — the slim image has no curl); a new `/health` on the panel that needs no login and no API | Compose waits on these, and `docker compose ps` shows them |
-| Stopping | Exec-form `CMD` so Python is PID 1 and gets SIGTERM; `stop_grace_period` long enough for the generator to finish its hour | `live.py` already finishes the hour and commits on SIGTERM — this lets it |
+| Stopping | Exec-form `CMD` so Python is PID 1 and gets SIGTERM; `stop_grace_period` long enough for the generator to finish its step | `live.py` already finishes the step and commits on SIGTERM — this lets it |
 | Restarts | `unless-stopped` for long-running services, none for `migrate` and `seed` | A one-shot that restarts would run forever |
 
 ### Traps to plan for
@@ -628,16 +632,17 @@ dev loop.
   because each hour has more players than the last — and months from now it is
   longer and the dataset bigger. The API and panel work while it catches up.
   `CATCH_UP=0` catches up slowly instead, one simulated hour every 12 s. Either
-  way it stops at *now*: after that each hour is written once it has really ended
-  (it used to carry on at 300× real time into the future — fixed in phase 8).
+  way it stops at *now*: after that each 5-minute tick is written once its sessions
+  are over in the real world (it used to carry on at 300× real time into the
+  future — fixed in phase 8).
 - **The first `up -d` waits for the seed.** The generator depends on the seed having
   *finished*, so `docker compose up -d` only returns after the backfill — about
   half a minute — not at once.
 - **A reboot ignores `depends_on`.** Docker restarts `unless-stopped` containers by
   itself, in no particular order, and does not run `migrate` or `seed`. A generator
   that starts before Postgres crashes and is restarted with a growing back-off until
-  Postgres is up — seen in step 4, and harmless: each simulated hour is one
-  transaction, so an interrupted hour is rolled back and redone.
+  Postgres is up — seen in step 4, and harmless: each step of the live generator
+  is one transaction, so an interrupted step is rolled back and redone.
 - **`exec` and a local file.** `docker compose exec postgres psql -f db/tests/…`
   looks for the file *inside* the container. Feed it on stdin instead:
   `docker compose exec -T postgres psql -U antifraud -d antifraud < db/tests/invariants.sql`
@@ -740,7 +745,8 @@ with phase 5.
   wrong for a fresh seed; Newman caught `linkedPlayerId` (step 6).
 - **The live generator ran into the future.** Once caught up it carried on at 300×
   real time; the panel showed bets settled five days ahead. It now waits for each
-  hour to end in the real world.
+  step to end in the real world — an hour then, five minutes since the 5-minute
+  ticks.
 - An `.env` copied before an update lacks the new variables, and compose refuses to
   start at all — even `ps` (step 5).
 - A second clone on the same machine is the *same* project, because the name is
