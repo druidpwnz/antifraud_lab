@@ -145,8 +145,8 @@ def insert_odds_history(conn, selection_id, odds, changed_at):
     )
 
 
-def move_odds(conn, hour):
-    """Odds drift on upcoming matches: every hour a few selections change price."""
+def move_odds(conn, tick):
+    """Odds drift on upcoming matches: every tick a few selections change price."""
     rows = conn.execute(
         """
         SELECT s.id, s.current_odds
@@ -158,11 +158,12 @@ def move_odds(conn, hour):
           AND s.status = 'open'
         ORDER BY s.id
         """,
-        (hour,),
+        (tick,),
     ).fetchall()
 
+    chance = helpers.per_tick(config.ODDS_MOVE_CHANCE)
     for selection_id, odds in rows:
-        if not helpers.chance(config.ODDS_MOVE_CHANCE):
+        if not helpers.chance(chance):
             continue
 
         factor = Decimal(str(round(random.uniform(*config.ODDS_MOVE_RANGE), 4)))
@@ -170,9 +171,9 @@ def move_odds(conn, hour):
         if new_odds == odds:
             continue
 
-        # second 0 of the hour belongs to fixture creation, so moves start at second 1
-        # and each selection moves at most once per hour: (selection_id, changed_at) is UNIQUE
-        changed_at = helpers.random_time_in_hour(hour, min_second=1)
+        # second 0 of the tick belongs to fixture creation, so moves start at second 1
+        # and each selection moves at most once per tick: (selection_id, changed_at) is UNIQUE
+        changed_at = helpers.random_time_in_tick(tick, min_second=1)
 
         conn.execute(
             "UPDATE selections SET current_odds = %s WHERE id = %s",

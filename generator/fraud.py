@@ -64,11 +64,11 @@ def break_settlement(result, correct_payout, stake, total_odds):
     }
 
 
-def maybe_late_bets(conn, hour, hour_end, active_players, balances):
+def maybe_late_bets(conn, tick, limit, active_players, balances):
     """Bets written after the match has already kicked off.
 
     Normal betting cannot produce these: load_open_selections only offers matches
-    starting after the current hour. So this goes round it deliberately, and prices
+    starting after the current tick. So this goes round it deliberately, and prices
     the bet at the last pre-match odds - move_odds stops touching a selection once
     its match starts, which is exactly the stale price a late bettor wants.
     """
@@ -84,16 +84,16 @@ def maybe_late_bets(conn, hour, hour_end, active_players, balances):
             continue
 
         if in_play is None:
-            in_play = load_in_play_selections(conn, hour)
+            in_play = load_in_play_selections(conn, tick)
         if not in_play:
             return
 
         selection_id, odds, event_id, start_time = random.choice(in_play)
 
         # the bet must land while the match is still being played: after kickoff,
-        # before the final whistle, and inside this hour
+        # before the final whistle, and inside this session
         final_whistle = start_time + timedelta(minutes=config.MATCH_MINUTES)
-        placed_at = helpers.after(player, 20, 900, min(hour_end, final_whistle))
+        placed_at = helpers.after(player, *config.ACTION_GAP_SECONDS, min(limit, final_whistle))
         if placed_at is None:
             continue
 
@@ -117,7 +117,7 @@ def maybe_late_bets(conn, hour, hour_end, active_players, balances):
         })
 
 
-def load_in_play_selections(conn, hour):
+def load_in_play_selections(conn, tick):
     """Selections on matches that have started but are not over yet."""
     return conn.execute(
         """
@@ -131,11 +131,11 @@ def load_in_play_selections(conn, hour):
           AND e.start_time + (%s * interval '1 minute') > %s
         ORDER BY s.id
         """,
-        (hour, config.MATCH_MINUTES, hour),
+        (tick, config.MATCH_MINUTES, tick),
     ).fetchall()
 
 
-def maybe_stake_escalation(conn, hour_end, active_players, balances, open_selections):
+def maybe_stake_escalation(conn, limit, active_players, balances, open_selections):
     """One bet far larger than anything this player has staked before.
 
     The shape of an account takeover: weeks of small bets, then someone else empties
@@ -158,7 +158,7 @@ def maybe_stake_escalation(conn, hour_end, active_players, balances, open_select
         if balance < average * Decimal(str(config.ESCALATION_MIN_MULTIPLE)):
             continue        # not enough money for the bet to look anomalous
 
-        placed_at = helpers.after(player, 20, 900, hour_end)
+        placed_at = helpers.after(player, *config.ACTION_GAP_SECONDS, limit)
         if placed_at is None:
             continue
 

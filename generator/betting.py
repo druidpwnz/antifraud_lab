@@ -12,8 +12,12 @@ import config
 import helpers
 
 
-def load_open_selections(conn, hour_end):
+def load_open_selections(conn, limit):
     """Selections you can still bet on: matches that start inside the betting window.
+
+    `limit` is the latest a bet from this tick can be placed. Only matches starting
+    after it are offered, so an ordinary bet is never placed after kickoff - that
+    is reserved for the planted late bets.
 
     ORDER BY is not decoration - the caller picks from this list with a seeded random,
     so an undefined row order would make the whole run irreproducible.
@@ -31,11 +35,11 @@ def load_open_selections(conn, hour_end):
           AND e.start_time <= %s
         ORDER BY s.id
         """,
-        (hour_end, hour_end + timedelta(hours=config.BET_WINDOW_HOURS)),
+        (limit, limit + timedelta(hours=config.BET_WINDOW_HOURS)),
     ).fetchall()
 
 
-def create_bets(conn, hour_end, active_players, balances, open_selections):
+def create_bets(conn, limit, active_players, balances, open_selections):
     """Each active player with money places a few bets."""
     if not open_selections:
         return
@@ -48,9 +52,9 @@ def create_bets(conn, hour_end, active_players, balances, open_selections):
         for _ in range(how_many_bets):
             if balance < Decimal(config.MIN_STAKE):
                 break
-            placed_at = helpers.after(player, 20, 900, hour_end)
+            placed_at = helpers.after(player, *config.ACTION_GAP_SECONDS, limit)
             if placed_at is None:
-                break        # no time left in this hour
+                break        # no time left in this session
 
             legs = pick_legs(open_selections)
             total_odds = combined_odds(legs)

@@ -23,13 +23,12 @@ def archetype_for(player_id):
     return rng.choices(list(weights), weights=list(weights.values()))[0]
 
 
-def create_players(conn, hour, all_players):
-    """Register this hour's new players. Returns them - they are active this hour."""
+def create_players(conn, tick, all_players):
+    """Register this tick's new players. Returns them - they are active this tick."""
     new_players = []
 
-    for _ in range(helpers.how_many(config.NEW_PLAYERS_PER_HOUR, hour)):
-        # Registration no later than :50, so the sign-up flow finishes inside the hour.
-        registered_at = helpers.random_time_in_hour(hour, max_second=3000)
+    for _ in range(helpers.how_many(config.NEW_PLAYERS_PER_HOUR, tick)):
+        registered_at = helpers.random_time_in_tick(tick)
 
         housemate = None
         if all_players and helpers.chance(config.HOUSEHOLD_CHANCE):
@@ -74,8 +73,8 @@ def create_players(conn, hour, all_players):
 
         player["session_id"] = insert_session(conn, player, registered_at, ip)
 
-        # Payment method is added 30 s - 5 min after registering.
-        added_at = registered_at + timedelta(seconds=random.randint(30, 300))
+        added_at = registered_at + timedelta(
+            seconds=random.randint(*config.PAYMENT_METHOD_DELAY_SECONDS))
         add_payment_method(conn, player, added_at, housemate)
         player["clock"] = added_at
 
@@ -115,18 +114,18 @@ def add_payment_method(conn, player, added_at, housemate=None):
     player["last4"] = last4
 
 
-def create_sessions(conn, hour, all_players):
-    """Some existing players log in this hour. Returns the ones who did."""
+def create_sessions(conn, tick, all_players):
+    """Some existing players log in this tick. Returns the ones who did."""
     active = []
 
     for player in all_players:
         login_chance = config.ARCHETYPES[player["archetype"]]["login_chance"]
-        if not helpers.chance(login_chance * helpers.intensity(hour)):
+        if not helpers.chance(helpers.per_tick(login_chance * helpers.intensity(tick))):
             continue
 
-        started_at = helpers.random_time_in_hour(hour, max_second=3000)
+        started_at = helpers.random_time_in_tick(tick)
         if started_at <= player["clock"]:
-            continue     # still busy with something from before - no login this hour
+            continue     # still busy with something from before - no login this tick
 
         if helpers.chance(config.NEW_IP_CHANCE):
             ip = helpers.random_ip()
@@ -151,11 +150,12 @@ def insert_session(conn, player, started_at, ip):
     ).fetchone()[0]
 
 
-def close_sessions(conn, active_players, hour_end):
-    """End of the hour: each session ends a little after the player's last action."""
+def close_sessions(conn, active_players, limit):
+    """Each session ends a little after the player's last action."""
     for player in active_players:
-        ended_at = player["clock"] + timedelta(seconds=random.randint(60, 900))
-        ended_at = min(ended_at, hour_end)
+        ended_at = player["clock"] + timedelta(seconds=random.randint(*config.SESSION_END_SECONDS))
+        ended_at = min(ended_at, limit)
+        player["clock"] = ended_at   # the next session starts after this one ends
         conn.execute(
             "UPDATE sessions SET ended_at = %s WHERE id = %s",
             (ended_at, player["session_id"]),

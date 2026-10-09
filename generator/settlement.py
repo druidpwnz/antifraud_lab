@@ -1,6 +1,6 @@
 # finishing matches, paying bets
 #
-# Runs at the START of each hour, before players do anything. A match that kicked off
+# Runs at the START of each tick, before players do anything. A match that kicked off
 # more than 2 hours ago is over, its bets are paid, and only then can that money be
 # staked again - so a payout is always credited before it can be spent.
 
@@ -14,8 +14,9 @@ import fraud
 import helpers
 
 
-def finish_events(conn, hour):
-    """Play out every match that is over by now and decide all of its selections."""
+def finish_events(conn, tick):
+    """Play out every match that is over by now and decide all of its selections.
+    Returns how many matches it finished."""
     finished = conn.execute(
         """
         SELECT id, start_time
@@ -24,7 +25,7 @@ def finish_events(conn, hour):
           AND start_time + interval '2 hours' <= %s
         ORDER BY id
         """,
-        (hour,),
+        (tick,),
     ).fetchall()
 
     for event_id, start_time in finished:
@@ -56,6 +57,8 @@ def finish_events(conn, hour):
             (start_time + timedelta(minutes=config.MATCH_MINUTES), event_id),
         )
 
+    return len(finished)
+
 
 def selection_won(market_type, outcome, home_goals, away_goals):
     """Did this selection win, given the final score?"""
@@ -76,7 +79,7 @@ def selection_won(market_type, outcome, home_goals, away_goals):
     raise ValueError(f"unknown market type: {market_type}")
 
 
-def settle_bets(conn, hour, balances):
+def settle_bets(conn, tick, balances):
     """Pay every open bet whose legs are all decided."""
     ready = conn.execute(
         """
@@ -108,7 +111,7 @@ def settle_bets(conn, hour, balances):
         # and a settlement timestamped earlier than its own bet is nonsense.
         settled_at = min(
             max(last_finish, placed_at) + timedelta(seconds=random.randint(60, 600)),
-            hour,
+            tick,
         )
 
         payout, planted = fraud.break_settlement(result, payout, stake, total_odds)

@@ -185,6 +185,94 @@ either side of `sim_state.sim_time`. Run `db/tests/invariants.sql` after the liv
 generator has been going for a while — every check must still pass. (Done: it does,
 across 134k bets written by two processes.)
 
+### 5-minute ticks (next)
+
+**The problem:** the live generator may not write the future, so it writes each
+simulated hour once that hour has ended — and the panel, and phase 9's graphs, get a
+block of data once an hour and nothing in between. Shorter steps make it arrive every
+five minutes, never more than ten minutes old.
+
+**The approach:** the step itself gets shorter — `tick.one_tick()` instead of
+`tick.one_hour()`, still the one code path for backfill and live. Two other ways were
+considered and dropped: generating the hour ahead and releasing its rows as their
+timestamps pass (every `INSERT` would need a buffer, and the generator reads its own
+writes — odds, ids, balances — so a crash halfway through an hour leaves rows that
+are hard to undo), and keeping sessions an hour long across many small ticks (each
+player's half-finished session would have to survive between ticks and restarts).
+
+#### Decisions
+
+| Topic | Decision | Why |
+|---|---|---|
+| Tick length | `TICK_MINUTES = 5` in `config.py`, must divide 60. Not an environment variable | The tick is part of what the dataset *is*: same seed + same tick = same data |
+| Rates | Counts per hour (new players) are scaled by the tick: a Poisson mean × 5/60. Chances per hour (logging in, an odds move) become the chance per tick that gives the same per hour: `1 - (1 - p) ** (5/60)` | An hour holds as many registrations, logins and odds moves as before |
+| Sessions | A session starts at any second of its tick and may run on into the next one, but is over by that one's end. Its actions are 10–45 s apart (were 20–900 s), so it lasts a few minutes. Per-session numbers — bets per session, deposit chance, the fraud rates — stay as they are | Starting only early in the tick (the first version) left the last minutes of every tick empty — a 5-minute sawtooth in any per-minute graph. A few-minute visit is what mobile betting looks like anyway |
+| The work at the start of a step | Approving withdrawals, finishing matches and paying bets run every tick | A match is settled within 5 minutes of its end instead of up to an hour |
+| Paying bets | `settle_bets` runs only in a tick where `finish_events` finished a match | It is the biggest cost that repeats every step — its query is 12 s of the 46 s backfill — and without a finished match it cannot find anything new |
+| Fixtures | Created in the midnight tick, as now | — |
+| Live pace | Writes a tick once the tick *after* it has ended too — when every session it starts is over — so the newest data is 5–10 minutes old. `REAL_SECONDS_PER_SIM_HOUR` keeps its meaning (12 s per simulated hour = 1 s per tick) | Nothing in the future, and no rhythm in the timestamps. The `.env` stays as it is |
+| Restarts | A player's clock resumes at the end of their last session, not at `sim_time` | A session can now end after `sim_time`; resuming at `sim_time` could start a second, overlapping session |
+| The dataset | Changes: new ids, so the Postman variables and the example ids in the READMEs are checked again. Still deterministic — two fresh seeds stay identical | Unavoidable: a different step draws the random numbers in a different order |
+
+#### Traps to plan for
+
+- **Everything in a session must end inside its window** — its tick and the next
+  one. Today a payment method is added 30–300 s after registering and a deposit is
+  processed up to 10 minutes after it is made — too long for that. Every delay
+  inside a session shrinks, and a check after the change asserts that no row is
+  later than its window, and that no player has two sessions at once.
+- **An ordinary bet must never be placed after kickoff** — every late bet is
+  planted, and an invariant checks it. With sessions running on into the next tick,
+  bets are only offered on matches starting after the *session's* limit, not the
+  tick's end.
+- **`odds_history` has `UNIQUE (selection_id, changed_at)`.** At most one move per
+  selection per tick, at second 1 or later — second 0 of midnight belongs to fixture
+  creation, as now.
+- **Twelve times as many steps.** Every per-step query runs 12× as often. Measured
+  before the change: the 14-day backfill takes 46 s; the target is under 2 minutes,
+  and the five-week catch-up not much over its ten minutes.
+- **An existing database is hourly.** The live generator can carry on from one (an
+  hour boundary is a tick boundary), but its history keeps the old shape — `docker
+  compose down -v` for a consistent dataset.
+
+#### Build order — one step at a time, reviewed before the next
+
+- [x] 1. Baseline: on a throwaway stack, the current code's `profile.sql`, fraud
+      labels per pattern, bets per session and backfill time — saved to compare with
+- [x] 2. `TICK_MINUTES`, `tick.one_tick()`, every module taking the tick's start and
+      end instead of an hour, the shorter session timings, and the backfill loop
+- [x] 3. Compare with the baseline: invariants 12/12, no row outside its session's
+      window, no overlapping sessions, two seeds identical table by table, backfill
+      31 s → 48 s. Registrations, sessions and odds moves per hour stay as they were
+      — but bets are up 28% (see below). Found in review: the first version started
+      every session in its tick's first 2 minutes, so minutes 3–4 of every tick had
+      no logins or sign-ups at all; now each minute of a tick gets a fifth of
+      everything
+
+      | 14-day backfill | hourly | 5-minute |
+      |---|---|---|
+      | players / sessions | 1544 / 9612 | 1567 / 10004 |
+      | bets / bets per session | 15978 / 1.66 | 20458 / 2.05 |
+      | deposits / withdrawals | 4203 / 1053 | 4797 / 1346 |
+      | odds moves | 9544 | 10324 |
+      | session length, average | 23.8 min | 2.8 min |
+      | plants: late bet / settlement error / stake escalation | 19 / 78 / 30 | 37 / 78 / 51 |
+
+      **Why more bets:** the hourly sessions were cut short. A session started up to
+      :50, its actions were 20–900 s apart, and an action that fell past the end of
+      the hour was dropped — so a high-roller's "3–6 bets per session" often came
+      out as one or two. The short sessions fit, and `bets_per_session` now means
+      what it says. The shape of the day is unchanged; every hour has about 28% more.
+- [x] 4. `live.py`: waits for each tick; checked running — the tick 17:55–18:00 was
+      written at 18:05:00, its newest row 18:04:32; a restart in the middle of the
+      catch-up resumed at the next tick with no overlapping sessions; stop during
+      the wait in under a second; catch-up from 2026-09-01 in 8 minutes (was ~10 —
+      paying bets only after a finished match more than makes up for 12× the ticks)
+- [ ] 5. The new dataset's fallout: Postman ids, the README example ids, Newman, the
+      API and panel test suites
+- [ ] 6. Docs: this section, `GENERATOR_BACKFILL.md`, `FRAUD_PATTERNS.md`, the
+      comments in `config.py` and `.env.example`
+
 ---
 
 ## Phase 5 — Thin alerting (postponed until after the API)

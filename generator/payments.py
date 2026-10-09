@@ -12,7 +12,7 @@ import config
 import helpers
 
 
-def create_deposits(conn, hour_end, active_players, balances):
+def create_deposits(conn, limit, active_players, balances):
     """Players who are short of money top up. Only approved deposits add to the balance."""
     for player in active_players:
         balance = balances.setdefault(player["id"], Decimal("0.00"))
@@ -26,9 +26,9 @@ def create_deposits(conn, hour_end, active_players, balances):
         if not helpers.chance(deposit_chance):
             continue
 
-        created_at = helpers.after(player, 30, 600, hour_end)
+        created_at = helpers.after(player, *config.ACTION_GAP_SECONDS, limit)
         if created_at is None:
-            continue        # no time left in this hour
+            continue        # no time left in this session
 
         amount = helpers.money(
             random.lognormvariate(settings["deposit_mu"], settings["deposit_sigma"]),
@@ -39,11 +39,14 @@ def create_deposits(conn, hour_end, active_players, balances):
         # The provider answers seconds to minutes later. The player waits for that answer,
         # so their clock moves to processed_at - they cannot bet with money not yet credited.
         #
-        # Clamped to the end of THIS hour, not to config.END. Clamping to END was a bug
+        # Clamped to the session's limit, not to config.END. Clamping to END was a bug
         # that only appeared in live mode: past END it pulled processed_at back before
         # created_at (which the schema forbids) and dragged the player's clock backwards,
         # so their later rows were timestamped in the past.
-        processed_at = min(created_at + timedelta(seconds=random.randint(5, 600)), hour_end)
+        processed_at = min(
+            created_at + timedelta(seconds=random.randint(*config.DEPOSIT_PROCESSING_SECONDS)),
+            limit,
+        )
         player["clock"] = processed_at
 
         conn.execute(
@@ -61,7 +64,7 @@ def create_deposits(conn, hour_end, active_players, balances):
             balances[player["id"]] = balance + amount
 
 
-def create_withdrawals(conn, hour_end, active_players, balances):
+def create_withdrawals(conn, limit, active_players, balances):
     """Players sitting on a decent balance cash out.
 
     A withdrawal is created as 'pending' with no processed_at - that is what the
@@ -79,7 +82,7 @@ def create_withdrawals(conn, hour_end, active_players, balances):
         if not helpers.chance(config.WITHDRAWAL_CHANCE):
             continue
 
-        created_at = helpers.after(player, 30, 900, hour_end)
+        created_at = helpers.after(player, *config.ACTION_GAP_SECONDS, limit)
         if created_at is None:
             continue
 
@@ -111,7 +114,7 @@ def due_at(transaction_id, created_at):
     return created_at + timedelta(hours=rng.randint(*config.WITHDRAWAL_DELAY_HOURS))
 
 
-def process_withdrawals(conn, hour):
+def process_withdrawals(conn, tick):
     """Approve the withdrawals whose turn has come. Anything still waiting when a run
     ends simply stays pending - which is what a real database looks like."""
     waiting = conn.execute(
@@ -125,7 +128,7 @@ def process_withdrawals(conn, hour):
 
     for transaction_id, created_at in waiting:
         approved_at = due_at(transaction_id, created_at)
-        if approved_at <= hour:
+        if approved_at <= tick:
             conn.execute(
                 """
                 UPDATE transactions

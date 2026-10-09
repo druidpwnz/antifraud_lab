@@ -13,17 +13,23 @@ SEED = 42
 # The simulation ends at a FIXED moment, never datetime.now().
 # Same SEED + same END = exactly the same data on every run (CI depends on this).
 END = datetime(2026, 9, 1, tzinfo=timezone.utc)   # must be midnight UTC
-DAYS = 14                 
+DAYS = 14
+
+# One simulated step. Backfill and the live generator both move in steps of this
+# size, and the live generator writes each one as soon as it has ended in the real
+# world - so this is also how often new data appears. Must divide 60. It is part of
+# what the dataset is: the same SEED, END and TICK_MINUTES give the same data.
+TICK_MINUTES = 5
 
 NEW_PLAYERS_PER_HOUR = 5
 COUNTRIES = ["UA", "PL", "DE", "GB", "ES"]
 CURRENCY_BY_COUNTRY = {"UA": "UAH", "PL": "PLN", "DE": "EUR", "GB": "GBP", "ES": "EUR"}
 
-# weight = share of new players; login_chance = chance to log in during an average hour
 # weight       - share of new players
 # login_chance - chance to log in during an average hour
 # deposit_mu / stake_mu etc - log-normal amounts: median is exp(mu), a few are much bigger
 # low_balance  - below this the player tops up
+# deposit_chance, bets_per_session - per session
 ARCHETYPES = {
     "casual": {
         "weight": 70, "login_chance": 0.02,
@@ -43,6 +49,16 @@ ARCHETYPES = {
 }
 
 PAYMENT_TYPES = {"card": 70, "crypto": 15, "bank": 15}
+
+# A session starts anywhere in its tick - so the data has no 5-minute rhythm - and
+# may run on into the next one, but must be over by that tick's end: the live
+# generator writes a tick once the NEXT one has ended too, so nothing it writes is
+# ever in the future. Everything in a session - signing up, depositing, betting,
+# cashing out - fits in that window.
+ACTION_GAP_SECONDS = (10, 45)            # between one action of a player and the next
+PAYMENT_METHOD_DELAY_SECONDS = (10, 60)  # registering -> adding a payment method
+DEPOSIT_PROCESSING_SECONDS = (5, 60)     # the provider's answer; the player waits for it
+SESSION_END_SECONDS = (30, 120)          # last action -> leaving the site
 
 # Honest noise, so the linked-accounts rule has real false positives to deal with.
 # A "household" player copies the country and IP of an existing player,
@@ -90,6 +106,7 @@ MATCH_MINUTES = 110          # kickoff to final whistle
 MAX_GOALS = 10               # goal counts above this are ignored when pricing
 MARGIN = 1.06                # bookmaker margin: without it random betting would break even
 ODDS_MOVE_CHANCE = 0.10      # share of upcoming selections whose odds move in an hour
+                             # (spread over the hour's ticks - see helpers.per_tick)
 ODDS_MOVE_RANGE = (0.95, 1.05)
 
 # --- Step 4: deposits ----------------------------------------------------
@@ -124,13 +141,13 @@ INJECT_FRAUD = True
 SETTLEMENT_ERROR_RATE = 0.005
 SETTLEMENT_ERROR_OFFSET = (0.05, 0.40)   # how far off the payout is, as a share
 
-LATE_BET_RATE = 0.01                # chance per active player per hour
+LATE_BET_RATE = 0.01                # chance per session
 
 # Account takeover shape: a long history of small bets, then one huge one.
-# Only ~6% of active player-hours are eligible (needs a betting history AND a balance
-# worth emptying), so this rate is much higher than the other patterns' to land a
+# Only ~6% of sessions are eligible (needs a betting history AND a balance worth
+# emptying), so this rate is much higher than the other patterns' to land a
 # comparable number of plants.
-STAKE_ESCALATION_RATE = 0.10        # chance per eligible active player per hour
+STAKE_ESCALATION_RATE = 0.10        # chance per eligible session
 ESCALATION_MIN_BETS = 15            # needs a history first, or there is no anomaly
 ESCALATION_MIN_MULTIPLE = 8         # balance must be this many average stakes
 ESCALATION_MULTIPLE = (10, 40)      # how many average stakes the big bet is
@@ -139,7 +156,7 @@ ESCALATION_MULTIPLE = (10, 40)      # how many average stakes the big bet is
 # Read from the environment so a container can change them without a rebuild;
 # these are the defaults when the variable is not set.
 
-# Never ahead of the real clock: once caught up, each hour is written when it has
+# Never ahead of the real clock: once caught up, each tick is written when it has
 # ended in the real world. These two only decide how it gets there.
 CATCH_UP = True                     # behind: run flat out until the sim clock reaches now
 REAL_SECONDS_PER_SIM_HOUR = 12      # behind with CATCH_UP off: 12 = one sim day per 5 minutes

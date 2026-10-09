@@ -8,6 +8,7 @@ from datetime import timedelta
 import config
 import db
 import events
+import helpers
 import tick
 
 
@@ -36,21 +37,21 @@ with db.connect() as conn:
                  "Start again from an empty database: bash reset.sh "
                  "(or, under compose: docker compose down -v)")
 
-    # matches for the first days, so the loop has something to bet on from hour one
+    # matches for the first days, so the loop has something to bet on from the first tick
     for day_offset in range(config.FIXTURE_DAYS_AHEAD + 1):
         events_created += events.create_fixtures_for_day(
             conn, start, start + timedelta(days=day_offset)
         )
 
-    hour = start
-    while hour < end:
-        events_created += tick.one_hour(conn, hour, all_players, balances)
+    step = start
+    while step < end:
+        events_created += tick.one_tick(conn, step, all_players, balances)
+        step = step + helpers.TICK
 
-        if hour.hour == 23:
+        if step.hour == 0 and step.minute == 0:
             conn.commit()     # once per simulated day
-            print("done", hour.date(), "players:", len(all_players), "events:", events_created)
-
-        hour = hour + timedelta(hours=1)
+            print("done", (step - helpers.TICK).date(), "players:", len(all_players),
+                  "events:", events_created)
 
     # remember where the simulated clock stopped, for the live generator
     conn.execute(

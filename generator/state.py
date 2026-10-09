@@ -16,8 +16,9 @@ import players
 def load(conn, sim_time):
     """Rebuild (all_players, balances) as the backfill would have had them.
 
-    Every player's clock is set to sim_time: all their past actions happened before
-    the resume point, so that is a safe lower bound for their next one.
+    A player's clock is where their next action may start: the end of their last
+    session, or sim_time if that is later. Not simply sim_time - a session may run
+    on past the end of its tick (helpers.SPILL), so the last one can end after it.
     """
     all_players = {}
     for player_id, country, currency in conn.execute(
@@ -32,15 +33,18 @@ def load(conn, sim_time):
         }
 
     # the device is the same in every session, so the latest one is fine
-    for player_id, device_id, user_agent in conn.execute(
+    for player_id, device_id, user_agent, ended_at in conn.execute(
         """
-        SELECT DISTINCT ON (player_id) player_id, device_id, user_agent
+        SELECT DISTINCT ON (player_id) player_id, device_id, user_agent, ended_at
         FROM sessions
         ORDER BY player_id, started_at DESC
         """
     ).fetchall():
         if player_id in all_players:
-            all_players[player_id].update(device_id=device_id, user_agent=user_agent)
+            player = all_players[player_id]
+            player.update(device_id=device_id, user_agent=user_agent)
+            if ended_at is not None and ended_at > player["clock"]:
+                player["clock"] = ended_at
 
     # The home IP is the one they use MOST, not the one they used last: 15% of
     # sessions come from a throwaway address (mobile, travel) without the player

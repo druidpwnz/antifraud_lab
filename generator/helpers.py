@@ -8,6 +8,16 @@ import uuid
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
+import config
+
+assert 60 % config.TICK_MINUTES == 0, "TICK_MINUTES must divide 60"
+TICK = timedelta(minutes=config.TICK_MINUTES)
+TICK_SECONDS = config.TICK_MINUTES * 60
+TICK_SHARE = config.TICK_MINUTES / 60        # of an hour
+# How far past the end of its tick a session may run. The live generator waits this
+# much longer before writing a tick, so its newest rows are 5-10 minutes old.
+SPILL = TICK
+
 
 HOUR_WEIGHTS = {
     0: 0.5, 1: 0.3, 2: 0.2, 3: 0.1, 4: 0.1, 5: 0.1,
@@ -40,9 +50,20 @@ def poisson_pmf(mean, k):
 
 
 def how_many(per_hour, dt):
+    """How many things happen in one tick, given how many happen in an average hour."""
     # The old int(expected * noise) always returned 0 when expected was below ~0.7,
     # so nobody ever registered between 03:00 and 06:00.
-    return poisson(per_hour * intensity(dt))
+    return poisson(per_hour * TICK_SHARE * intensity(dt))
+
+
+def per_tick(chance_per_hour):
+    """The chance per tick that adds up to this chance per hour.
+
+    Not chance_per_hour * TICK_SHARE: twelve 5-minute tries at p/12 each come out a
+    little above p, because some hours would get two hits. 1 - (1 - p) ** share is
+    exact - the chance of at least one hit in the hour is p again.
+    """
+    return 1 - (1 - chance_per_hour) ** TICK_SHARE
 
 
 def chance(probability):
@@ -52,8 +73,8 @@ def pick_weighted(weights):
     # weights: dict like {"card": 70, "crypto": 15, "bank": 15}
     return random.choices(list(weights), weights=list(weights.values()))[0]
 
-def random_time_in_hour(hour_start, min_second=0, max_second=3599):
-    return hour_start + timedelta(seconds=random.randint(min_second, max_second))
+def random_time_in_tick(tick_start, min_second=0, max_second=TICK_SECONDS - 1):
+    return tick_start + timedelta(seconds=random.randint(min_second, max_second))
 
 
 # All random values go through `random`, so they follow the seed.
@@ -83,8 +104,8 @@ def money(value, minimum="0.01"):
 
 def after(player, min_seconds, max_seconds, limit):
     """Next timestamp for this player, `min_seconds`..`max_seconds` after their last
-    action. Returns None if that would fall outside the current hour, so the player
-    simply does nothing more this hour."""
+    action. Returns None if that would fall past `limit`, so the player simply does
+    nothing more in this session."""
     moment = player["clock"] + timedelta(seconds=random.randint(min_seconds, max_seconds))
     if moment >= limit:
         return None
