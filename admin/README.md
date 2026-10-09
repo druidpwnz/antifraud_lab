@@ -129,15 +129,15 @@ errors.
 | `/` | API status card, refreshed every 30 s | `/ready`, `/v1/players?limit=1` |
 | `/health` | `{"status": "ok"}` — no login, no API call. For Docker's healthcheck: an API outage must not get the panel restarted | none |
 | `/players` | Players, newest first. Filters: country, status, order. "Player ID" box | `GET /v1/players` |
-| `/players/11` | Status, country, currency; balance and its four parts; tabs | `/v1/players/11`, `/balance` |
-| `/players/11?tab=transactions` | Deposits and withdrawals, method and last four digits | `/transactions?order=desc` |
-| `/players/11?tab=bets` | The player's bets, each linking to its bet page | `/bets?order=desc` |
-| `/players/11?tab=sessions` | Logins: IP, device, user agent | `/sessions?order=desc` |
-| `/players/11?tab=linked` | Other players sharing a device or a payment method | `/linked` |
+| `/players/32` | Status, country, currency; balance and its four parts; tabs | `/v1/players/32`, `/balance` |
+| `/players/32?tab=transactions` | Deposits and withdrawals, method and last four digits | `/transactions?order=desc` |
+| `/players/32?tab=bets` | The player's bets, each linking to its bet page | `/bets?order=desc` |
+| `/players/32?tab=sessions` | Logins: IP, device, user agent | `/sessions?order=desc` |
+| `/players/32?tab=linked` | Other players sharing a device or a payment method | `/linked` |
 | `/bets` | Every player's bets, newest first. Filters: status, minimum stake, order. "Bet ID" box | `GET /v1/bets` |
-| `/bets/900` | Stake, odds, result, payout; the legs and their matches; warnings | `GET /v1/bets/900` |
+| `/bets/654` | Stake, odds, result, payout; the legs and their matches; warnings | `GET /v1/bets/654` |
 | `/events` | Matches in kickoff order, upcoming by default. Filters: status, league, order | `GET /v1/events?sort=start_time` |
-| `/events/482` | Every market, every selection, current odds | `GET /v1/events/482` |
+| `/events/29` | Every market, every selection, current odds | `GET /v1/events/29` |
 
 Every list shows 25 rows, then **Load more**. Every page links onward: a bet to its
 player and its matches, a player's bet to the bet, a linked player to that player.
@@ -152,8 +152,9 @@ A bet page says out loud three things anyone could check from the numbers on it:
 
 This is not fraud detection — that is phase 9, in Prometheus. It is a few lines in
 `views/bets.py` over the API's own data, and it never reads `fraud_labels` (the panel
-cannot even reach it). In a fresh dataset (`SEED = 42`, `DAYS = 14`), bets 103, 178
-and 649 show one each.
+cannot even reach it). In a fresh dataset (`SEED = 42`, `DAYS = 14`), bets 654, 525
+and 771 show one each, in that order — and bet 664 shows two: a late bet that was
+also paid the wrong amount.
 
 ---
 
@@ -207,7 +208,7 @@ shift a page, so load more never repeats or skips a row.
 
 The server renders the tab bar *and* the active tab's table together, and htmx swaps
 both. So the server decides which tab is highlighted — no JavaScript for that. Each
-tab is a real link (`/players/11?tab=bets`), pushed into the address bar: Back,
+tab is a real link (`/players/32?tab=bets`), pushed into the address bar: Back,
 reload and bookmarks all land on the right tab. Switching tabs does not fetch the
 player or the balance again.
 

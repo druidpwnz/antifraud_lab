@@ -268,8 +268,12 @@ player's half-finished session would have to survive between ticks and restarts)
       catch-up resumed at the next tick with no overlapping sessions; stop during
       the wait in under a second; catch-up from 2026-09-01 in 8 minutes (was ~10 —
       paying bets only after a finished match more than makes up for 12× the ticks)
-- [ ] 5. The new dataset's fallout: Postman ids, the README example ids, Newman, the
-      API and panel test suites
+- [x] 5. The new dataset's fallout: `linkedPlayerId` 11 → 32 (player 11 has no
+      links any more), the panel README's example bets → 654, 525, 771 (one warning
+      each) and event → 29 (482 no longer exists). Newman: 36 requests, 60
+      assertions, 0 failed. The API and panel test suites do not depend on generated
+      data — the API's write their own rows into `antifraud_test`, the panel's mock
+      the API — so they cannot change
 - [ ] 6. Docs: this section, `GENERATOR_BACKFILL.md`, `FRAUD_PATTERNS.md`, the
       comments in `config.py` and `.env.example`
 
@@ -707,7 +711,8 @@ with phase 5.
 - [x] 6. Proof on a clean clone — every line of *Proof it works* below passed on a
       clone built with `--no-cache --pull` (61 s to all healthy). Newman found the
       one thing a fresh dataset breaks: `linkedPlayerId` was 5, picked from the old
-      local database, and player 5 has no links on a fresh seed — now 11
+      local database, and player 5 has no links on a fresh seed — now 11 (32 since
+      the 5-minute ticks)
 - [x] 7. Docs: a quick start at the top of this README, this section, the service READMEs
 
 ### Proof it works

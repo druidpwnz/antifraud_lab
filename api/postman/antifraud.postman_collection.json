@@ -32,7 +32,7 @@
     },
     {
       "key": "linkedPlayerId",
-      "value": "11"
+      "value": "32"
     },
     {
       "key": "otherSideId",
@@ -936,7 +936,7 @@
                 "linked"
               ]
             },
-            "description": "linkedPlayerId is 11 by default: on a fresh seed player 11 shares a payment method with another player. Change it in the collection's Variables tab if your data differs."
+            "description": "linkedPlayerId is 32 by default: on a fresh seed player 32 shares a device with another player. Change it in the collection's Variables tab if your data differs."
           }
         },
         {
