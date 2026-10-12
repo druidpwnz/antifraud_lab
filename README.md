@@ -66,11 +66,11 @@ is in the service READMEs: [`api/`](api/README.md), [`admin/`](admin/README.md),
 | 2 | Backfill generator | **done** |
 | 3 | Fraud injector | **3 patterns done** |
 | 4 | Live generator | **done** (no metrics yet) |
-| 5 | Thin alerting (fills `alerts`) | **postponed** — after the API |
+| 5 | Thin alerting (fills `alerts`) | **part of phase 9** — its first steps |
 | 6 | API — FastAPI | **done** — 15 endpoints, 140 tests, Postman collection |
 | 7 | Admin panel — Flask + Jinja + HTMX, over the API | **done** — players, bets, events; 140 tests |
 | 8 | Compose, for real | **done** — one `docker compose up -d`, six services |
-| 9 | Grafana + Prometheus — fraud alerting | not started |
+| 9 | Detection rules, Prometheus, Grafana — fraud alerting | **next** — planned |
 | 10 | CI/CD — GitHub Actions | not started |
 
 Done so far: 14-table schema with constraints that hold, a seeded reproducible
@@ -284,6 +284,9 @@ player's half-finished session would have to survive between ticks and restarts)
 ---
 
 ## Phase 5 — Thin alerting (postponed until after the API)
+
+**Now part of [phase 9](#phase-9--detection-prometheus-grafana-where-fraud-becomes-an-alert-next),
+as its first steps.** The plan below is what it grew from.
 
 Not the old phase 3. No window-function tuning, no threshold optimisation. This
 exists for one reason: **`alerts` must have rows in it, or the API has nothing to
@@ -756,40 +759,149 @@ with phase 5.
 
 ---
 
-## Phase 9 — Grafana + Prometheus: where fraud becomes an alert
+## Phase 9 — Detection, Prometheus, Grafana: where fraud becomes an alert (next)
 
-Detected fraud surfaces here. Two alerting paths, and they are not interchangeable.
+**The goal:** planted fraud is found by simple rules, shows up on Grafana dashboards
+within minutes, and fires alerts — and the whole lab is watched: a stopped generator,
+a stuck rules runner or a failing API fires an alert too. Still one `docker compose
+up -d`.
 
-**Grafana alerting, on the Postgres datasource — per-entity alerts.**
-Grafana runs SQL on a schedule and fires on the rows it gets back, so it can name a
-player, a cluster or a settlement.
+Phase 5, postponed until after the API, is the first part of this phase: without
+rules nothing fills `alerts`, and the fraud dashboards and alerts would have nothing
+to show.
 
-- [ ] Fire on a new high-severity row in `alerts`
-- [ ] Fire on a settlement mismatch above a money threshold
-- [ ] Fire on a device or fingerprint gaining a third distinct player
-- [ ] Notification channel — whatever you actually read: Telegram, email, webhook
+```
+ generator ──writes──>  postgres  <──reads── api
+                        ^      ^
+ rules ─reads, writes───┘      └──reads (read-only user)── grafana
+        into alerts                                          │ dashboards,
+                                                             │ alert rules
+ generator, api, rules ──/metrics──> prometheus <──queries───┘
+```
 
-**Prometheus alerting — aggregate shape, never per entity.**
-A Prometheus series is identified by its labels, so **`player_id`, `alert_id` and
-`device_id` must never be labels** — that is unbounded cardinality and it will take
-the instance down. Label by `rule_code` and `severity`, which are small fixed sets.
+### Decisions
 
-- [ ] Alert when the detection rate for a rule doubles or drops to zero
-- [ ] Alert when the rules-runner has not completed a run in N minutes
-- [ ] Alert when the live generator's sim clock falls behind wall clock
-- [ ] Alert on API error rate and p99 latency
+| Topic | Decision | Why |
+|---|---|---|
+| Rules | A new `rules` service: Python, one plain `.sql` file per rule in `rules/sql/`, run every minute, inserting into `alerts` with `ON CONFLICT DO NOTHING` on the existing `UNIQUE (player_id, rule_code, window_start, window_end)` | The obvious query, not a clever one — the budget is an evening per rule, not a week. A rule in its own file can be read, run in `psql` and diffed |
+| First rules | One per planted pattern: `SETTLEMENT_MISMATCH`, `LATE_BET`, `STAKE_ANOMALY` | Something to score against `fraud_labels` from day one |
+| What has been checked | A `rule_state` table (migration 005): per rule, the highest row id it has looked at. Each run reads only newer rows | Ids only grow. A timestamp would not do: the generator writes 5–10 minutes behind its own clock, and a settlement is backdated to the match |
+| Ground truth | Rules never read `fraud_labels`. Scoring does — `db/scoring.sql` and the *Scoring* dashboard join `alerts` to it for precision and recall per rule | A dashboard is not a detection rule. Scoring is what makes the alerts believable |
+| Metrics | `prometheus_client` in the generator, the API and the rules runner, each on its own port **9100, never published** — Prometheus reaches them over the compose networks | `/metrics` stays off the LAN, and the API's public port serves only the API |
+| Labels | Only small fixed sets: `rule_code`, `severity`, `table`, HTTP method, **route template** (`/v1/players/{player_id}`), status. Never `player_id`, `bet_id`, a raw path | Every label value makes a new time series; ids would make millions and take Prometheus down |
+| Alerting | All alert rules are **Grafana-managed**, on two datasources: per-entity ones on Postgres ("player 532: wrong payout"), aggregate ones on Prometheus ("LATE_BET detections dropped to zero"). No Alertmanager | One place to see and silence alerts. Telegram later is one contact point, not a second system |
+| Notifications | None yet: alerts fire and show in Grafana's UI | Telegram comes later — then a bot token in `.env` and one provisioned contact point |
+| Grafana's database access | A read-only Postgres role `grafana_reader`, `SELECT` only, set up by `db/migrate.py` when `GRAFANA_DB_PASSWORD` is set — role, password and grants, on every run. Not in a migration | Grafana's query editor runs any SQL it is given. With the owner's login, a typo could `DELETE` data. A role belongs to the whole server, and a local database owner may not create one |
+| Provisioning | Datasources, dashboards (JSON) and alert rules (YAML) are files in `grafana/`, loaded at start-up | Nothing lives only inside Grafana's database; a fresh clone gets the same dashboards. Edit in the UI, export over the file, commit — like the Postman collection |
+| Images | `prom/prometheus` and `grafana/grafana-oss`, exact versions pinned | Same reason as `postgres:18` — an upgrade is a decision, not a surprise |
+| Ports | Grafana published on `GRAFANA_PORT` (3000), Prometheus on `PROMETHEUS_PORT` (9090), both from `.env`. Grafana's admin password in `.env` | The Prometheus UI (targets, raw queries) is worth having in a lab |
+| Storage | Volumes `prometheus-data` (30 days of metrics) and `grafana-data` | Metrics survive `down`; `down -v` clears them with everything else |
+| Networks | `rules`, Prometheus and Grafana on `db`; Prometheus and Grafana also on `web` (published ports; Telegram later needs the internet) | The admin panel still cannot reach Postgres |
+| Not in this phase | Alerts in the API and the panel, and reviewing them (`new` → `confirmed` / `false_positive`) | A phase of its own — an API resource, a panel page and the review write. Until then every alert stays `new` |
 
-**Dashboards**
+### The first rules
 
-- [ ] *Fraud*: alerts per hour by rule, top risk players, flagged share of volume,
-      alerts by status (new / confirmed / false positive)
-- [ ] *Scoring*: planted vs detected vs missed per pattern, precision and recall as
-      stat panels — this is where `fraud_labels` is allowed to appear, because a
-      dashboard is not a detection rule
-- [ ] *Money*: deposits vs withdrawals, turnover, house margin over time
-- [ ] *Ops*: API latency and error rate, generator rows/sec, runner duration and lag
-- [ ] Datasources, dashboards **and alert rules** provisioned as JSON in the repo,
-      so nothing lives only inside Grafana's own database
+| Rule | Finds | Severity | Expected |
+|---|---|---|---|
+| `SETTLEMENT_MISMATCH` | `ABS(payout - stake * total_odds) > 0.01 WHERE result = 'won'` — written the obvious way on purpose | high | Precision 1.0, recall about 0.33 — `lost_bet_paid` is invisible to it (see `generator/FRAUD_PATTERNS.md`) |
+| `LATE_BET` | `bets.placed_at > events.start_time` on any leg | high | Precision and recall 1.0 — the baseline is clean |
+| `STAKE_ANOMALY` | A stake at least 8× the player's average over their previous 50 bets, with at least 15 before it | medium | High recall; precision below 1 — honest high-rollers sometimes do this too |
+
+Then the learning loop, as a step of its own: the *Scoring* dashboard shows
+`SETTLEMENT_MISMATCH` missing two thirds, the rule is fixed to cover losing bets
+that were paid, and recall goes to 1.0 on the next run.
+
+### Alerts
+
+| Alert | Datasource | Fires when |
+|---|---|---|
+| High-severity detection | Postgres | a new `high` or `critical` row in `alerts` — names the player |
+| Big payout mismatch | Postgres | a `SETTLEMENT_MISMATCH` over a money threshold |
+| Shared device | Postgres | a device gains a third distinct player (households make two common) |
+| Detection rate shift | Prometheus | a rule's detections per hour double, or drop to zero, against the day before |
+| Rules runner stale | Prometheus | no successful run for 10 minutes |
+| Generator behind | Prometheus | the simulated clock more than 20 minutes behind the real one (5–10 is normal) |
+| API errors / latency | Prometheus | 5xx above 1% of requests, or p99 above 1 s, for 5 minutes |
+
+### Dashboards
+
+- *Fraud*: detections per hour by rule, the players with the most alerts, flagged
+  share of bets
+- *Scoring*: planted vs detected vs missed per pattern, precision and recall
+- *Money*: deposits vs withdrawals, turnover, the house margin over time
+- *Ops*: API request rate, errors and latency by route; generator rows per second and
+  lag; rules runner duration and last success
+
+### Traps to plan for
+
+- **Route, not path.** A label taken from the raw URL — `/v1/players/532` — is one
+  series per player. The API's metrics label requests by FastAPI's route template.
+- **Counters restart at zero** whenever a container restarts. Graphs and alerts use
+  `rate()` / `increase()`, which handle that; a raw counter value means nothing.
+- **Two clocks, again.** Dashboards on Postgres plot *simulated* time
+  (`placed_at`), dashboards on Prometheus plot *real* time. Once the generator has
+  caught up they agree within 10 minutes; during the catch-up they do not.
+- **The first rules run scans everything** — 14 days of backfill plus the catch-up.
+  `rule_state` makes the next run cheap; the first one is measured.
+- **Grafana runs as uid 472.** A bind-mounted data folder owned by someone else
+  stops it at start-up; a named volume avoids that.
+- **Provisioned dashboards are read-only in the UI.** Changes are made, exported and
+  committed — or they vanish at the next restart.
+- **"No data" is not "OK".** An alert over a stopped service gets no data at all;
+  each alert says what no data means (for *rules runner stale*, it means firing).
+- **Inside the Postgres container nothing checks a password.** The official image
+  trusts connections from `127.0.0.1` and the socket, so `docker compose exec
+  postgres psql -U grafana_reader` gets in with any password, or none — found in
+  step 1, when an old password still "worked". Logins are tested from another
+  container, over the network, the way Grafana connects.
+- **A metrics server in the API process** works with one uvicorn worker, which is
+  what runs today. More workers would need `prometheus_client`'s multiprocess mode.
+
+### Layout
+
+```
+rules/
+  Dockerfile  requirements.txt
+  runner.py               every minute: each rule, from its rule_state, into alerts
+  sql/*.sql               one rule per file
+  tests/                  each rule finds its shape in hand-made rows, and not an honest one
+db/migrations/005_rules.sql   rule_state
+db/scoring.sql            precision and recall per rule
+prometheus/prometheus.yml scrape jobs
+grafana/provisioning/     datasources, dashboard provider, alert rules
+grafana/dashboards/*.json
+```
+
+### Build order — one step at a time, reviewed before the next
+
+- [x] 1. Migration 005 (`rule_state`), and `migrate` setting up `grafana_reader` from
+      `.env` on every run — checked: the reader reads every table and cannot insert,
+      update, delete or create; a changed password works at the next run and the old
+      one is refused; a second database on the same server migrates too. Found by
+      running it locally: the role was first in the migration, and a local database
+      owner may not create roles — `permission denied to create role`. A role is
+      server-wide, so it moved to the runner, which only does it under compose
+- [ ] 2. The rules runner and the three rules, with tests; `db/scoring.sql`; the
+      `rules` service in compose — `alerts` fills, scoring prints numbers
+- [ ] 3. Metrics in the generator, the API and the rules runner, with tests that
+      the labels stay small
+- [ ] 4. Prometheus in compose — every target `UP`
+- [ ] 5. Grafana in compose, datasources provisioned — Explore answers from both
+- [ ] 6. Dashboards: *Ops*, *Fraud*, *Scoring*, *Money*
+- [ ] 7. Alert rules, provisioned — each one made to fire on purpose (stop the rules
+      runner, stop the generator, ...) and to resolve again
+- [ ] 8. The learning loop: fix `SETTLEMENT_MISMATCH`, watch recall go to 1.0
+- [ ] 9. Docs: this section, the quick start (two new URLs), `.env.example`
+
+### Proof it works
+
+- From a fresh clone: `cp .env.example .env && docker compose up -d` — Grafana opens
+  with four dashboards already there, and data in them.
+- Every Prometheus target `UP`; no metric has a label with an id in it
+  (`count by (__name__)` stays small).
+- The *Scoring* dashboard agrees with `db/scoring.sql` run by hand.
+- Each alert has been seen firing and resolving.
+- `invariants.sql` still 12/12: the rules only ever write to `alerts` and `rule_state`.
 
 ---
 

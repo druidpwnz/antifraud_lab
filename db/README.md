@@ -35,6 +35,15 @@ transaction, and is recorded in the `schema_migrations` table — so running it 
 applies only what is new. A failing file rolls back completely and stops the run.
 `reset.sh` and the compose stack's `migrate` service both use this script.
 
+**`grafana_reader`** is a read-only role for Grafana: `SELECT` on every table and
+nothing else. It is not a migration — a role belongs to the whole Postgres server,
+and a database owner is usually not allowed to create one (step 1 of phase 9 found
+that out locally). When `GRAFANA_DB_PASSWORD` is set — compose sets it, and runs as
+a superuser — the runner creates the role if needed, sets its password and grants
+`SELECT` on every table, at the end of every run: new tables are covered, and a
+password changed in `.env` takes effect at the next `docker compose up -d`.
+Locally, without Grafana, leave it unset.
+
 **Adding one:** a new file with the next number, `005_what_it_does.sql`, starting
 with `SET TIME ZONE 'UTC';` like the others — a `timestamptz` literal in a migration
 is read in the session's time zone, so without it the same file means different

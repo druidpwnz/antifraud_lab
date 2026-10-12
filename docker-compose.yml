@@ -77,7 +77,10 @@ services:
   migrate:
     <<: *generator-image
     command: ["python", "/app/db/migrate.py"]
-    environment: *db-env
+    environment:
+      <<: *db-env
+      # the read-only login Grafana will use (phase 9); set on every run
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:?set GRAFANA_DB_PASSWORD in .env - see .env.example}
     depends_on:
       postgres:
         condition: service_healthy

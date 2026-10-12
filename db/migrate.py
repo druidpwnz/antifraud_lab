@@ -3,6 +3,7 @@
     python db/migrate.py                 # the database in DATABASE_URL (default: antifraud)
     DATABASE_URL="dbname=antifraud_test" python db/migrate.py
     python db/migrate.py --baseline      # a database migrated by hand before this existed
+    GRAFANA_DB_PASSWORD=... python db/migrate.py   # also: set up Grafana's read-only login
 
 Every db/migrations/*.sql file runs once, in filename order, each in its own
 transaction, and is recorded in the schema_migrations table. Run it again and it
@@ -16,6 +17,9 @@ exactly as it was before that file, and the files after it are not tried.
 A migration is never edited once it has been applied anywhere - the runner only
 knows filenames, so an edit would silently not reach databases that already ran it.
 Changes go in a new file.
+
+After the migrations, if GRAFANA_DB_PASSWORD is set, it sets up grafana_reader -
+see set_up_grafana_reader().
 """
 
 import argparse
@@ -24,6 +28,7 @@ import sys
 from pathlib import Path
 
 import psycopg
+from psycopg import sql
 
 MIGRATIONS = Path(__file__).parent / "migrations"
 
@@ -76,10 +81,12 @@ def main() -> None:
         pending = [f for f in files if f.name not in applied]
         if not pending:
             print(f"up to date - {len(applied)} migrations applied")
-            return
-        for f in pending:
-            apply(conn, f)
-        print(f"done - applied {len(pending)}, {len(applied) + len(pending)} in total")
+        else:
+            for f in pending:
+                apply(conn, f)
+            print(f"done - applied {len(pending)}, {len(applied) + len(pending)} in total")
+
+        set_up_grafana_reader(conn)
 
 
 def apply(conn: psycopg.Connection, f: Path) -> None:
@@ -101,6 +108,47 @@ def baseline(conn: psycopg.Connection, files: list[Path], applied: set[str]) -> 
         for name in new:
             conn.execute("INSERT INTO schema_migrations (filename) VALUES (%s)", (name,))
     print(f"recorded {len(new)} migrations as applied, ran none: {', '.join(new) or '-'}")
+
+
+def set_up_grafana_reader(conn: psycopg.Connection) -> None:
+    """Grafana's login: SELECT on every table and nothing else - Grafana's query
+    editor runs whatever SQL it is given, and with the owner's login a typo could
+    DELETE data.
+
+    Not a migration: a role belongs to the whole Postgres server, not to one
+    database, and creating one needs a superuser or CREATEROLE. Compose runs this as
+    the superuser POSTGRES_USER; a local database owner usually may not create
+    roles, and local development without Grafana does not need one - so it only
+    happens when GRAFANA_DB_PASSWORD is set.
+
+    All of it runs on every run: the grant covers tables a new migration has just
+    added, and a password changed in .env reaches the database at the next
+    `docker compose up` - unlike POSTGRES_PASSWORD, which Postgres only reads when
+    it creates the database.
+    """
+    password = os.environ.get("GRAFANA_DB_PASSWORD", "")
+    if not password:
+        return
+    try:
+        with conn.transaction():
+            exists = conn.execute(
+                "SELECT EXISTS (SELECT FROM pg_roles WHERE rolname = 'grafana_reader')"
+            ).fetchone()[0]
+            if not exists:
+                conn.execute("CREATE ROLE grafana_reader")
+            # ALTER ROLE and GRANT take no query parameters, so the values go in as
+            # quoted literals and identifiers - a password with ' in it cannot break out.
+            conn.execute(sql.SQL("ALTER ROLE grafana_reader WITH LOGIN PASSWORD {}")
+                         .format(sql.Literal(password)))
+            database = conn.execute("SELECT current_database()").fetchone()[0]
+            conn.execute(sql.SQL("GRANT CONNECT ON DATABASE {} TO grafana_reader")
+                         .format(sql.Identifier(database)))
+            conn.execute("GRANT USAGE ON SCHEMA public TO grafana_reader")
+            conn.execute("GRANT SELECT ON ALL TABLES IN SCHEMA public TO grafana_reader")
+    except psycopg.errors.InsufficientPrivilege as exc:
+        sys.exit(f"grafana_reader could not be set up - this login may not create or change roles:\n{exc}\n"
+                 "Unset GRAFANA_DB_PASSWORD (only compose needs it), or run as a superuser.")
+    print("grafana_reader: " + ("created, " if not exists else "") + "password and grants set")
 
 
 def table_exists(conn: psycopg.Connection, name: str) -> bool:
