@@ -1,0 +1,5 @@
+# An allowlist: only what the image copies. Tests and the virtualenv never reach it.
+*
+!requirements.txt
+!runner.py
+!sql/

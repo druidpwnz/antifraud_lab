@@ -783,7 +783,7 @@ to show.
 
 | Topic | Decision | Why |
 |---|---|---|
-| Rules | A new `rules` service: Python, one plain `.sql` file per rule in `rules/sql/`, run every minute, inserting into `alerts` with `ON CONFLICT DO NOTHING` on the existing `UNIQUE (player_id, rule_code, window_start, window_end)` | The obvious query, not a clever one — the budget is an evening per rule, not a week. A rule in its own file can be read, run in `psql` and diffed |
+| Rules | A new `rules` service: Python, one plain `.sql` file per rule in `rules/sql/`, run every minute, inserting into `alerts` with `ON CONFLICT DO NOTHING`. Each alert carries `source_id`, the row it is about, and is unique on `(rule_code, player_id, window_start, window_end, source_id)` (migration 006) | The obvious query, not a clever one — the budget is an evening per rule, not a week. A rule in its own file can be read, run in `psql` and diffed |
 | First rules | One per planted pattern: `SETTLEMENT_MISMATCH`, `LATE_BET`, `STAKE_ANOMALY` | Something to score against `fraud_labels` from day one |
 | What has been checked | A `rule_state` table (migration 005): per rule, the highest row id it has looked at. Each run reads only newer rows | Ids only grow. A timestamp would not do: the generator writes 5–10 minutes behind its own clock, and a settlement is backdated to the match |
 | Ground truth | Rules never read `fraud_labels`. Scoring does — `db/scoring.sql` and the *Scoring* dashboard join `alerts` to it for precision and recall per rule | A dashboard is not a detection rule. Scoring is what makes the alerts believable |
@@ -854,6 +854,12 @@ that were paid, and recall goes to 1.0 on the next run.
   postgres psql -U grafana_reader` gets in with any password, or none — found in
   step 1, when an old password still "worked". Logins are tested from another
   container, over the network, the way Grafana connects.
+- **One writer per source table.** The rules walk ids upwards and never look back.
+  That is only safe because the generator is the one writer of `bets` and
+  `settlements` and commits in id order; with two writers, a row could commit after
+  a higher id was already passed, and be skipped for good.
+- **A `%` in a rule's comment breaks it.** psycopg reads `%(...)s` as a placeholder
+  even inside an SQL comment.
 - **A metrics server in the API process** works with one uvicorn worker, which is
   what runs today. More workers would need `prometheus_client`'s multiprocess mode.
 
@@ -866,6 +872,7 @@ rules/
   sql/*.sql               one rule per file
   tests/                  each rule finds its shape in hand-made rows, and not an honest one
 db/migrations/005_rules.sql   rule_state
+db/migrations/006_alerts_source_id.sql   which row an alert is about
 db/scoring.sql            precision and recall per rule
 prometheus/prometheus.yml scrape jobs
 grafana/provisioning/     datasources, dashboard provider, alert rules
@@ -884,8 +891,22 @@ grafana/dashboards/*.json
       Also checked: the reader is refused `payment_methods.fingerprint` — by name,
       by `SELECT *` and in a join — but gets every other column, including one
       added later
-- [ ] 2. The rules runner and the three rules, with tests; `db/scoring.sql`; the
-      `rules` service in compose — `alerts` fills, scoring prints numbers
+- [x] 2. The rules runner and the three rules, with tests; `db/scoring.sql`; the
+      `rules` service in compose — `alerts` fills, scoring prints numbers. 20 tests,
+      and 10 mutations of the rules and the runner each make one fail. On a fresh
+      stack the first run took 0.2 s for all three rules over ~27,000 bets, and
+      scoring came out as the plan expected:
+
+      | Rule | Planted | Detected | Caught | False alarms | Precision | Recall |
+      |---|---|---|---|---|---|---|
+      | `LATE_BET` | 95 | 95 | 95 | 0 | 1.000 | 1.000 |
+      | `SETTLEMENT_MISMATCH` | 235 | 87 | 87 | 0 | 1.000 | 0.370 |
+      | `STAKE_ANOMALY` | 195 | 190 | 180 | 10 | 0.947 | 0.923 |
+
+      Found by the tests: two wrong payouts to one player settled in the same second
+      became one alert — `alerts` was unique on (player, rule, window), and the
+      generator dates many settlements to the start of a tick. Migration 006 adds
+      `source_id`, the row an alert is about, to the key
 - [ ] 3. Metrics in the generator, the API and the rules runner, with tests that
       the labels stay small
 - [ ] 4. Prometheus in compose — every target `UP`

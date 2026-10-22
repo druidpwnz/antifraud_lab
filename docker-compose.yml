@@ -3,6 +3,7 @@
 # Start-up order - each step waits for the one before to have finished, not just
 # started:
 #     postgres (healthy) -> migrate (exited 0) -> seed (exited 0) -> generator
+#                                              -> rules
 #                                              -> api (healthy) -> admin
 #
 #     API    http://<this machine>:8000/docs    (port: API_PORT in .env)
@@ -111,6 +112,22 @@ services:
     # On SIGTERM live.py finishes the step in progress and commits; give it time
     # before Docker sends SIGKILL (the default wait is 10 s).
     stop_grace_period: 30s
+
+  # Detection: every minute, each rule in rules/sql/ over the rows that arrived since
+  # its last run, into the alerts table. Needs only the schema - it follows the
+  # data as the seed and the generator write it.
+  rules:
+    build: ./rules
+    image: antifraud/rules
+    environment:
+      <<: *db-env
+      RUN_EVERY_SECONDS: ${RULES_EVERY_SECONDS:-60}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks: [db]
+    logging: *logging
 
   api:
     build: ./api
