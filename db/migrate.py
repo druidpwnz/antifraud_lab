@@ -37,6 +37,14 @@ MIGRATIONS = Path(__file__).parent / "migrations"
 # 003 as missing and both try to apply it.
 LOCK_ID = 8_241_105
 
+# Columns Grafana's login may not read - the same things the API never returns.
+# A card fingerprint is the hash of a card number or wallet address: the API
+# compares fingerprints inside the database ("these two players share a card") and
+# never hands one out, so Grafana does not get them either.
+SECRET_COLUMNS = {
+    "payment_methods": {"fingerprint"},
+}
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
@@ -113,7 +121,9 @@ def baseline(conn: psycopg.Connection, files: list[Path], applied: set[str]) -> 
 def set_up_grafana_reader(conn: psycopg.Connection) -> None:
     """Grafana's login: SELECT on every table and nothing else - Grafana's query
     editor runs whatever SQL it is given, and with the owner's login a typo could
-    DELETE data.
+    DELETE data. Not even SELECT on SECRET_COLUMNS: on those tables it gets every
+    other column, one by one, so `SELECT *` there is refused and queries name
+    their columns.
 
     Not a migration: a role belongs to the whole Postgres server, not to one
     database, and creating one needs a superuser or CREATEROLE. Compose runs this as
@@ -145,10 +155,45 @@ def set_up_grafana_reader(conn: psycopg.Connection) -> None:
                          .format(sql.Identifier(database)))
             conn.execute("GRANT USAGE ON SCHEMA public TO grafana_reader")
             conn.execute("GRANT SELECT ON ALL TABLES IN SCHEMA public TO grafana_reader")
+            for table, secret in SECRET_COLUMNS.items():
+                grant_all_columns_but(conn, table, secret)
     except psycopg.errors.InsufficientPrivilege as exc:
         sys.exit(f"grafana_reader could not be set up - this login may not create or change roles:\n{exc}\n"
                  "Unset GRAFANA_DB_PASSWORD (only compose needs it), or run as a superuser.")
     print("grafana_reader: " + ("created, " if not exists else "") + "password and grants set")
+
+
+def grant_all_columns_but(conn: psycopg.Connection, table: str, secret: set[str]) -> None:
+    """Swap the table-wide SELECT for SELECT on each column except `secret`.
+
+    The column list comes from the database every run, so a column a later
+    migration adds is readable at once - only a column named in SECRET_COLUMNS
+    stays hidden.
+    """
+    columns = [
+        name for (name,) in conn.execute(
+            """
+            SELECT column_name FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = %s
+            ORDER BY ordinal_position
+            """,
+            (table,),
+        ).fetchall()
+    ]
+    if not columns:
+        sys.exit(f"SECRET_COLUMNS names table {table!r}, which does not exist")
+    missing = secret - set(columns)
+    if missing:
+        # a renamed secret column would otherwise quietly become readable under its new name
+        sys.exit(f"SECRET_COLUMNS names {sorted(missing)} in {table!r}, which it does not have - "
+                 "was a column renamed?")
+    table_id = sql.Identifier(table)
+    conn.execute(sql.SQL("REVOKE SELECT ON {} FROM grafana_reader").format(table_id))
+    # a column-level grant left over from an earlier run on a secret column goes too
+    conn.execute(sql.SQL("REVOKE SELECT ({}) ON {} FROM grafana_reader").format(
+        sql.SQL(", ").join(map(sql.Identifier, sorted(secret))), table_id))
+    conn.execute(sql.SQL("GRANT SELECT ({}) ON {} TO grafana_reader").format(
+        sql.SQL(", ").join(sql.Identifier(c) for c in columns if c not in secret), table_id))
 
 
 def table_exists(conn: psycopg.Connection, name: str) -> bool:

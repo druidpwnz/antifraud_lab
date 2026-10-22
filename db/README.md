@@ -36,7 +36,12 @@ applies only what is new. A failing file rolls back completely and stops the run
 `reset.sh` and the compose stack's `migrate` service both use this script.
 
 **`grafana_reader`** is a read-only role for Grafana: `SELECT` on every table and
-nothing else. It is not a migration — a role belongs to the whole Postgres server,
+nothing else — and not even that on the columns in `SECRET_COLUMNS` in `migrate.py`,
+the things the API never returns either (today: `payment_methods.fingerprint`). On
+such a table it gets every other column one by one, so `SELECT *` there is refused
+and queries name their columns; a column added later is readable at once, and a
+secret column that disappears (renamed?) stops the run rather than leak under its
+new name. It is not a migration — a role belongs to the whole Postgres server,
 and a database owner is usually not allowed to create one (step 1 of phase 9 found
 that out locally). When `GRAFANA_DB_PASSWORD` is set — compose sets it, and runs as
 a superuser — the runner creates the role if needed, sets its password and grants

@@ -791,7 +791,7 @@ to show.
 | Labels | Only small fixed sets: `rule_code`, `severity`, `table`, HTTP method, **route template** (`/v1/players/{player_id}`), status. Never `player_id`, `bet_id`, a raw path | Every label value makes a new time series; ids would make millions and take Prometheus down |
 | Alerting | All alert rules are **Grafana-managed**, on two datasources: per-entity ones on Postgres ("player 532: wrong payout"), aggregate ones on Prometheus ("LATE_BET detections dropped to zero"). No Alertmanager | One place to see and silence alerts. Telegram later is one contact point, not a second system |
 | Notifications | None yet: alerts fire and show in Grafana's UI | Telegram comes later — then a bot token in `.env` and one provisioned contact point |
-| Grafana's database access | A read-only Postgres role `grafana_reader`, `SELECT` only, set up by `db/migrate.py` when `GRAFANA_DB_PASSWORD` is set — role, password and grants, on every run. Not in a migration | Grafana's query editor runs any SQL it is given. With the owner's login, a typo could `DELETE` data. A role belongs to the whole server, and a local database owner may not create one |
+| Grafana's database access | Direct, not through the API — with a read-only Postgres role `grafana_reader`: `SELECT` only, and not on the columns the API never returns either (`payment_methods.fingerprint`). Set up by `db/migrate.py` when `GRAFANA_DB_PASSWORD` is set — role, password and grants, on every run. Not in a migration | Dashboards ask for aggregates over time, which the API was not built for; scoring needs `fraud_labels`, which the API must never expose. The panel is a product and goes through the API; Grafana is analytics and reads the data, read-only. A typo in Grafana's SQL editor cannot `DELETE` anything, and a card fingerprint is no easier to get through Grafana than through the API. A role belongs to the whole server, and a local database owner may not create one |
 | Provisioning | Datasources, dashboards (JSON) and alert rules (YAML) are files in `grafana/`, loaded at start-up | Nothing lives only inside Grafana's database; a fresh clone gets the same dashboards. Edit in the UI, export over the file, commit — like the Postman collection |
 | Images | `prom/prometheus` and `grafana/grafana-oss`, exact versions pinned | Same reason as `postgres:18` — an upgrade is a decision, not a surprise |
 | Ports | Grafana published on `GRAFANA_PORT` (3000), Prometheus on `PROMETHEUS_PORT` (9090), both from `.env`. Grafana's admin password in `.env` | The Prometheus UI (targets, raw queries) is worth having in a lab |
@@ -880,7 +880,10 @@ grafana/dashboards/*.json
       one is refused; a second database on the same server migrates too. Found by
       running it locally: the role was first in the migration, and a local database
       owner may not create roles — `permission denied to create role`. A role is
-      server-wide, so it moved to the runner, which only does it under compose
+      server-wide, so it moved to the runner, which only does it under compose.
+      Also checked: the reader is refused `payment_methods.fingerprint` — by name,
+      by `SELECT *` and in a join — but gets every other column, including one
+      added later
 - [ ] 2. The rules runner and the three rules, with tests; `db/scoring.sql`; the
       `rules` service in compose — `alerts` fills, scoring prints numbers
 - [ ] 3. Metrics in the generator, the API and the rules runner, with tests that
