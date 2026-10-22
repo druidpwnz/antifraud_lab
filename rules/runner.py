@@ -22,10 +22,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import psycopg
+from prometheus_client import Counter, Gauge, Histogram, disable_created_metrics, start_http_server
 from psycopg import sql
 
 DSN = os.environ.get("DATABASE_URL", "dbname=antifraud")
 RUN_EVERY_SECONDS = float(os.environ.get("RUN_EVERY_SECONDS", "60"))
+# Prometheus metrics on this port (compose: 9100, not published); 0 = off
+METRICS_PORT = int(os.environ.get("METRICS_PORT", "0") or 0)
 SQL_DIR = Path(__file__).parent / "sql"
 
 
@@ -45,6 +48,26 @@ RULES = [
     Rule("LATE_BET", "high", "bets"),
     Rule("STAKE_ANOMALY", "medium", "bets"),
 ]
+
+# Without this, every counter gets a second series, <name>_created, holding when the
+# counter was made. Nothing here uses it; off, there are half as many series.
+disable_created_metrics()
+
+# --- metrics. Labels: rule_code and severity only - a fixed, small set. Never a
+#     player or a bet: every label value is a time series of its own. ---
+ALERTS = Counter("rules_alerts_created_total", "Alerts written, by rule.", ["rule_code", "severity"])
+SCANNED = Counter("rules_rows_scanned_total", "Source rows looked at, by rule.", ["rule_code"])
+RUNS = Counter("rules_runs_total", "Runs of all rules, by outcome.", ["outcome"])
+RUN_DURATION = Histogram("rules_run_duration_seconds", "Time for one run of all rules.")
+LAST_SUCCESS = Gauge("rules_last_success_timestamp_seconds",
+                     "When a run last finished without an error (Unix time).")
+# Every series exists from the start, at 0: an alert on "no LATE_BET alerts for a
+# day" must see a 0, not nothing at all.
+for _rule in RULES:
+    ALERTS.labels(_rule.code, _rule.severity)
+    SCANNED.labels(_rule.code)
+for _outcome in ("ok", "failed"):
+    RUNS.labels(_outcome)
 
 
 @dataclass(frozen=True)
@@ -106,6 +129,13 @@ def run_rule(conn: psycopg.Connection, rule: Rule) -> Result:
     return Result(rule.code, scanned, created, upto)
 
 
+def record(rule: Rule, result: Result) -> None:
+    """Count a rule's run - only once its transaction has committed, so the
+    metrics never show alerts that were rolled back."""
+    ALERTS.labels(rule.code, rule.severity).inc(result.created)
+    SCANNED.labels(rule.code).inc(result.scanned)
+
+
 def run_all(dsn: str = DSN) -> list[Result]:
     """Every rule once, each in its own transaction - one failing rule does not
     hold back the others' alerts."""
@@ -117,6 +147,7 @@ def run_all(dsn: str = DSN) -> list[Result]:
             started = time.monotonic()
             with conn.transaction():
                 result = run_rule(conn, rule)
+            record(rule, result)
             results.append(result)
             if result.scanned:
                 print(f"{rule.code}: {result.scanned} new rows, {result.created} alerts, "
@@ -143,15 +174,22 @@ def nap(seconds: float) -> None:
 def main() -> None:
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
+    if METRICS_PORT:
+        start_http_server(METRICS_PORT)
     print(f"rules: {', '.join(r.code for r in RULES)} - every {RUN_EVERY_SECONDS:g}s", flush=True)
 
     while running:
         started = time.monotonic()
         try:
-            run_all()
+            with RUN_DURATION.time():
+                run_all()
+            RUNS.labels("ok").inc()
+            LAST_SUCCESS.set_to_current_time()
         except psycopg.OperationalError as exc:
             # Postgres down or restarting: say so and try again next time, rather
             # than crash - the next run picks up from rule_state, nothing is lost.
+            # LAST_SUCCESS stops moving, which is what the "runner stale" alert sees.
+            RUNS.labels("failed").inc()
             print(f"database unavailable, will retry: {str(exc).strip().splitlines()[0]}",
                   file=sys.stderr, flush=True)
         nap(RUN_EVERY_SECONDS - (time.monotonic() - started))

@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, Depends, FastAPI
 
-from app import db, errors, settings
+from app import db, errors, metrics, settings
 from app.auth import require_api_key
 from app.routers import bets, events, health, players, risk_checks
 
@@ -20,6 +20,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Runs once at startup (before `yield`) and once at shutdown (after it)."""
     app.state.settings = settings.load()
     app.state.pool = db.create_pool(app.state.settings)
+    metrics.start_server(app.state.settings.metrics_port)
     try:
         yield
     finally:
@@ -34,6 +35,7 @@ app = FastAPI(
 )
 
 errors.install(app)
+app.add_middleware(metrics.MetricsMiddleware)
 
 app.include_router(health.router)   # no key needed: orchestrators call these
 

@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 import config
 import db
 import helpers
+import metrics
 import state
 import tick
 
@@ -32,6 +33,8 @@ def setting(name, default, cast=float):
 
 REAL_SECONDS_PER_SIM_HOUR = setting("REAL_SECONDS_PER_SIM_HOUR", config.REAL_SECONDS_PER_SIM_HOUR)
 CATCH_UP = setting("CATCH_UP", int(config.CATCH_UP), int) == 1
+# Prometheus metrics on this port (compose: 9100, not published); 0 = off
+METRICS_PORT = setting("METRICS_PORT", "0", lambda v: int(v or 0))
 
 running = True
 
@@ -73,6 +76,9 @@ with db.connect() as conn:
     pace = REAL_SECONDS_PER_SIM_HOUR * helpers.TICK_SHARE
     caught_up = False
 
+    metrics.start(METRICS_PORT, sim_time)
+    ids = metrics.newest_ids(conn)
+
     while running:
         tick_end = sim_time + helpers.TICK
         wait = tick_end + helpers.SPILL - datetime.now(timezone.utc)
@@ -104,6 +110,10 @@ with db.connect() as conn:
         conn.commit()
 
         behind = datetime.now(timezone.utc) - sim_time
+        ids_now = metrics.newest_ids(conn)
+        metrics.tick_written(ids, ids_now, time.monotonic() - started, sim_time,
+                             catching_up=behind > helpers.TICK + helpers.SPILL)
+        ids = ids_now
         if behind <= helpers.TICK + helpers.SPILL:
             # caught up: the loop's next turn waits for the next tick to end
             print(f"{sim_time}  players {len(all_players)}  "

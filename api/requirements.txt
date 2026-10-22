@@ -4,3 +4,4 @@ fastapi==0.141.*
 uvicorn[standard]==0.54.*
 psycopg[binary]==3.3.*
 psycopg-pool==3.3.*
+prometheus-client==0.26.*

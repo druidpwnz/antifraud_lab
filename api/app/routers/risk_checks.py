@@ -32,7 +32,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Path, Response
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
-from app import errors, ledger, scoring
+from app import errors, ledger, metrics, scoring
 from app.auth import CREATE_RISK_CHECKS, require_scope
 from app.db import get_conn
 from app.routers.players import load_player
@@ -112,6 +112,7 @@ def create_risk_check(
     # changed between versions, and a 201 for a row that is not stored yet would be a
     # lie a client could act on.
     conn.commit()
+    metrics.RISK_DECISIONS.labels(result.decision).inc()
     response.headers["Location"] = f"/v1/risk-checks/{row['id']}"
     return RiskCheck.model_validate(row)
 

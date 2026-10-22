@@ -835,7 +835,11 @@ that were paid, and recall goes to 1.0 on the next run.
 ### Traps to plan for
 
 - **Route, not path.** A label taken from the raw URL — `/v1/players/532` — is one
-  series per player. The API's metrics label requests by FastAPI's route template.
+  series per player. The API's metrics label requests by the route template.
+- **FastAPI 0.141 nests included routers.** The matched route in the request knows
+  only its own part — `/players/{player_id}`, without the `/v1` of the router around
+  it — found when the first metrics test failed. The full template comes from the
+  API's own OpenAPI document instead, which is public and stays put across upgrades.
 - **Counters restart at zero** whenever a container restarts. Graphs and alerts use
   `rate()` / `increase()`, which handle that; a raw counter value means nothing.
 - **Two clocks, again.** Dashboards on Postgres plot *simulated* time
@@ -907,8 +911,16 @@ grafana/dashboards/*.json
       became one alert — `alerts` was unique on (player, rule, window), and the
       generator dates many settlements to the start of a tick. Migration 006 adds
       `source_id`, the row an alert is about, to the key
-- [ ] 3. Metrics in the generator, the API and the rules runner, with tests that
-      the labels stay small
+- [x] 3. Metrics in the generator, the API and the rules runner, with tests that
+      the labels stay small — `prometheus_client` on port 9100 in each, off unless
+      `METRICS_PORT` is set. API 148 tests (8 new), rules 23 (3 new). Scraped from
+      inside the compose network: generator 28 series, API 21, rules 26; the API's
+      route labels after a mix of requests, typos and a `/wp-login.php`:
+      `/ready`, `/v1/bets/{bet_id}`, `/v1/players/{player_id}`, `unmatched`. The
+      generator's lag is worked out when Prometheus asks, so a hung generator shows a
+      lag that grows. Every counter exists at 0 from the start — "no declines" is a
+      0, not missing data — and the `*_created` series prometheus_client adds to
+      each counter are off (half the series, none used)
 - [ ] 4. Prometheus in compose — every target `UP`
 - [ ] 5. Grafana in compose, datasources provisioned — Explore answers from both
 - [ ] 6. Dashboards: *Ops*, *Fraud*, *Scoring*, *Money*

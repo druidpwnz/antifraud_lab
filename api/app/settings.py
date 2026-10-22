@@ -15,6 +15,7 @@ class Settings:
     pool_min: int
     pool_max: int
     api_read_keys: tuple[str, ...] = ()  # read only - what the admin panel gets
+    metrics_port: int = 0                # Prometheus metrics on this port; 0 = off
 
 
 def _key_list(name: str, default: str = "") -> tuple[str, ...]:
@@ -28,4 +29,5 @@ def load() -> Settings:
         api_read_keys=_key_list("API_READ_KEYS"),
         pool_min=int(os.environ.get("POOL_MIN", "1")),
         pool_max=int(os.environ.get("POOL_MAX", "10")),
+        metrics_port=int(os.environ.get("METRICS_PORT", "0") or 0),
     )

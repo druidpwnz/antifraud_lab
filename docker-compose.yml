@@ -105,6 +105,7 @@ services:
       <<: *db-env
       REAL_SECONDS_PER_SIM_HOUR: ${REAL_SECONDS_PER_SIM_HOUR:-12}
       CATCH_UP: ${CATCH_UP:-1}
+      METRICS_PORT: 9100              # for Prometheus, inside the networks; not published
     depends_on:
       seed:
         condition: service_completed_successfully
@@ -122,6 +123,7 @@ services:
     environment:
       <<: *db-env
       RUN_EVERY_SECONDS: ${RULES_EVERY_SECONDS:-60}
+      METRICS_PORT: 9100              # for Prometheus, inside the networks; not published
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -138,6 +140,7 @@ services:
       # The panel's key is always a read key, so the two cannot drift apart. Empty
       # entries (no extra API_READ_KEYS) are skipped by api/app/settings.py.
       API_READ_KEYS: ${PANEL_API_KEY:?set PANEL_API_KEY in .env - cp .env.example .env},${API_READ_KEYS:-}
+      METRICS_PORT: 9100              # for Prometheus, inside the networks; not published
     depends_on:
       # the schema must be there; the seed need not be - the API works on whatever
       # data there is, and answers while the backfill and the catch-up run
