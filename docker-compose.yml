@@ -6,8 +6,9 @@
 #                                              -> rules
 #                                              -> api (healthy) -> admin
 #
-#     API    http://<this machine>:8000/docs    (port: API_PORT in .env)
-#     panel  http://<this machine>:5000         (port: PANEL_PORT in .env)
+#     API         http://<this machine>:8000/docs    (port: API_PORT in .env)
+#     panel       http://<this machine>:5000         (port: PANEL_PORT in .env)
+#     Prometheus  http://<this machine>:9090         (port: PROMETHEUS_PORT in .env)
 #
 #     docker compose ps                      what is running, and is it healthy
 #     docker compose logs -f generator       follow one service
@@ -189,6 +190,33 @@ services:
     networks: [web]                     # NOT on db: the panel cannot reach Postgres
     logging: *logging
 
+  # Collects the metrics of generator, api and rules every 15 s and keeps them 30
+  # days. Its UI (targets, queries): http://<this machine>:9090
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    healthcheck:
+      # the image has busybox's wget, no curl
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9090/-/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+      start_interval: 1s
+    restart: unless-stopped
+    # db: where the targets are. web: the published port (an internal network
+    # cannot publish one).
+    networks: [db, web]
+    logging: *logging
+
 networks:
   # internal: no route out of this network - Postgres and the generator need
   # nothing from the internet, and nothing outside can reach in.
@@ -200,3 +228,4 @@ networks:
 
 volumes:
   pgdata:
+  prometheus-data:

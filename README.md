@@ -921,7 +921,13 @@ grafana/dashboards/*.json
       lag that grows. Every counter exists at 0 from the start — "no declines" is a
       0, not missing data — and the `*_created` series prometheus_client adds to
       each counter are off (half the series, none used)
-- [ ] 4. Prometheus in compose — every target `UP`
+- [x] 4. Prometheus in compose — every target `UP`: `prom/prometheus:v3.15.0`
+      (v3.15.1 was a day old), config in `prometheus/prometheus.yml`, scraping every
+      15 s, 30 days kept in the `prometheus-data` volume. Checked: `promtool check
+      config` passes; generator, api, rules and Prometheus itself all `up`; real
+      queries answer — rows per second by table, the generator's lag, alerts per rule,
+      seconds since the rules last succeeded; 932 series in all; data survives a
+      restart
 - [ ] 5. Grafana in compose, datasources provisioned — Explore answers from both
 - [ ] 6. Dashboards: *Ops*, *Fraud*, *Scoring*, *Money*
 - [ ] 7. Alert rules, provisioned — each one made to fire on purpose (stop the rules
