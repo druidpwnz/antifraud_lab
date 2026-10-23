@@ -20,9 +20,9 @@ docker compose up -d
 ```
 
 The first `up` builds three images and generates 14 days of history, about a
-minute. Then the live generator catches up from 2026-09-01 to *now* — about eight
-minutes, longer the later it is — and after that writes new data every five
-minutes, never ahead of the real clock.
+minute. Then the live generator catches up from 2026-09-01 to *now* — about 15
+minutes in late October, longer the later it is — and after that writes new data
+every five minutes, never ahead of the real clock.
 
 | What | Where | Login |
 |---|---|---|
@@ -880,7 +880,8 @@ rules/
   tests/                  each rule finds its shape in hand-made rows, and not an honest one
 db/migrations/005_rules.sql   rule_state
 db/migrations/006_alerts_source_id.sql   which row an alert is about
-db/scoring.sql            precision and recall per rule
+db/migrations/007_rule_scores.sql   the rule_scores view: precision and recall
+db/scoring.sql            SELECT * FROM rule_scores
 prometheus/prometheus.yml scrape jobs
 grafana/provisioning/     datasources, dashboard provider, alert rules
 grafana/dashboards/*.json
@@ -940,7 +941,15 @@ grafana/dashboards/*.json
       never sent back; no plugins downloaded at start-up; a clean start logs no
       errors (empty `plugins/` and `alerting/` folders, and the dashboard provider,
       are there so Grafana does not complain about them)
-- [ ] 6. Dashboards: *Ops*, *Fraud*, *Scoring*, *Money*
+- [x] 6. Dashboards: *Ops*, *Fraud*, *Scoring*, *Money* — JSON in `grafana/dashboards/`.
+      Scoring reads a new `rule_scores` view (migration 007), which `db/scoring.sql`
+      reads too, so the dashboard and the script cannot disagree — checked: the same
+      numbers on both. Every panel's query run through Grafana's API: no errors, no
+      empty panels; every dashboard rendered in Chromium and looked at — fixed after
+      looking: cut-off table columns, a jagged 1-minute rate, outlines of empty bars.
+      Rule colours validated for colour-blind separation on Grafana's dark
+      background. Money is one currency at a time: amounts in UAH and EUR cannot be
+      added. Catching up from 2026-09-01 now takes about 15 minutes (7½ weeks)
 - [ ] 7. Alert rules, provisioned — each one made to fire on purpose (stop the rules
       runner, stop the generator, ...) and to resolve again
 - [ ] 8. The learning loop: fix `SETTLEMENT_MISMATCH`, watch recall go to 1.0

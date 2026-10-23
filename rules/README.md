@@ -71,8 +71,9 @@ test data in it — is left as it was.
    looking only at ids `> %(last_id)s` and `<= %(upto)s` of its source table
 2. a `Rule(...)` line in `RULES` in `runner.py`
 3. tests: it finds its shape, and leaves the honest version alone
-4. a line in `rule_pattern` in `db/scoring.sql`, if it is meant to catch a planted
-   pattern
+4. if it is meant to catch a planted pattern: a line in `rule_pattern` in the
+   `rule_scores` view — a new migration with `CREATE OR REPLACE VIEW`, copying
+   `db/migrations/007_rule_scores.sql` (never edit an applied migration)
 
 **No percent sign in a rule's comments.** psycopg reads `%(...)s` as a placeholder
 even inside an SQL comment.
