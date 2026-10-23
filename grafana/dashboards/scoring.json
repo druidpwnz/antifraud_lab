@@ -162,7 +162,7 @@
       "id": 3,
       "type": "bargauge",
       "title": "Recall - how much planted fraud was found",
-      "description": "caught / planted. SETTLEMENT_MISMATCH is low on purpose until it learns about losing bets that were paid (phase 9 step 8).",
+      "description": "caught / planted. SETTLEMENT_MISMATCH was 0.33 until phase 9 step 8 taught it about losing bets that were paid; after a --rescan it is 1.0.",
       "gridPos": {
         "x": 12,
         "y": 3,

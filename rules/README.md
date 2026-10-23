@@ -10,12 +10,13 @@ The design decisions are in the main [README](../README.md) (phase 9).
 
 | Rule | File | Source | Finds | Severity |
 |---|---|---|---|---|
-| `SETTLEMENT_MISMATCH` | `sql/settlement_mismatch.sql` | settlements | a **won** bet paid more or less than stake × odds (by more than a cent) | high |
+| `SETTLEMENT_MISMATCH` | `sql/settlement_mismatch.sql` | settlements | a settlement that paid more or less than its result is worth — stake × odds when won, nothing when lost (by more than a cent) | high |
 | `LATE_BET` | `sql/late_bet.sql` | bets | a bet placed after one of its matches kicked off | high |
 | `STAKE_ANOMALY` | `sql/stake_anomaly.sql` | bets | a stake ≥ 8× the player's average over their previous 50 bets, after at least 15 | medium |
 
-`SETTLEMENT_MISMATCH` is written the obvious way on purpose: a *losing* bet that was
-paid is invisible to it. Scoring shows the cost; phase 9 step 8 fixes it.
+`SETTLEMENT_MISMATCH` was first written the obvious way, `WHERE result = 'won'`, on
+purpose: a *losing* bet that was paid was invisible to it, and scoring showed recall
+0.33. Phase 9 step 8 fixed it — see [Changing a rule](#changing-a-rule).
 
 ## How a run works
 
@@ -61,7 +62,7 @@ psql antifraud -f db/scoring.sql
 cd rules && pytest
 ```
 
-Against `antifraud_test` (or `TEST_DATABASE_URL`), migrated to at least 006. Every
+Against `antifraud_test` (or `TEST_DATABASE_URL`), migrated to at least 007. Every
 test runs in one transaction that is rolled back, so the database — and the API's
 test data in it — is left as it was.
 
@@ -74,6 +75,33 @@ test data in it — is left as it was.
 4. if it is meant to catch a planted pattern: a line in `rule_pattern` in the
    `rule_scores` view — a new migration with `CREATE OR REPLACE VIEW`, copying
    `db/migrations/007_rule_scores.sql` (never edit an applied migration)
+
+## Changing a rule
+
+The runner only reads rows above `last_id`, so a fixed rule sees only rows that
+arrive *after* the fix. To run the new version over everything already there:
+
+```bash
+docker compose up -d --build rules                                  # the new SQL
+docker compose exec rules python runner.py --rescan SETTLEMENT_MISMATCH
+```
+
+`--rescan` sets that rule's `last_id` back to 0 and exits; the running runner reads
+the whole source table on its next run (a minute). It is safe to repeat: alerts
+already raised hit `ON CONFLICT DO NOTHING`, so nothing is doubled — and they keep
+the `details` they were written with. The new alerts get today's `created_at`, so
+expect *High-severity detection* to fire for them, and *Detection rate shift* to
+see the jump.
+
+Measured on the 14-day seed (17,458 settlements, 78 planted errors):
+
+| `SETTLEMENT_MISMATCH` | Detected | Caught | Missed | Precision | Recall | Overpaid, found |
+|---|---|---|---|---|---|---|
+| `WHERE result = 'won'` | 26 | 26 | 52 | 1.000 | 0.333 | 192.49 |
+| expected payout from the result | 78 | 78 | 0 | 1.000 | **1.000** | 9,882.03 |
+
+The two thirds it used to miss were also the expensive ones: a losing bet paid out
+is the whole payout lost, not a 5–40% error.
 
 **No percent sign in a rule's comments.** psycopg reads `%(...)s` as a placeholder
 even inside an SQL comment.

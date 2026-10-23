@@ -60,6 +60,10 @@ threshold. Losing bets outnumber winners roughly 2:1, so about two thirds of wha
 is planted here cannot be found by the obvious version of the rule. Recall of ~0.33
 on this pattern is the rule's fault, not the data's.
 
+**Fixed in phase 9 step 8.** `rules/sql/settlement_mismatch.sql` now takes the
+expected payout from the result — stake × odds when won, 0 when lost — and recall
+is 1.0. The old rows were read again with `runner.py --rescan` (`rules/README.md`).
+
 ---
 
 ## 2. `MULTI_ACCOUNT` — planned

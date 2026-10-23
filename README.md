@@ -803,7 +803,7 @@ to show.
 
 | Rule | Finds | Severity | Expected |
 |---|---|---|---|
-| `SETTLEMENT_MISMATCH` | `ABS(payout - stake * total_odds) > 0.01 WHERE result = 'won'` — written the obvious way on purpose | high | Precision 1.0, recall about 0.33 — `lost_bet_paid` is invisible to it (see `generator/FRAUD_PATTERNS.md`) |
+| `SETTLEMENT_MISMATCH` | `ABS(payout - stake * total_odds) > 0.01 WHERE result = 'won'` — written the obvious way on purpose | high | Precision 1.0, recall about 0.33 — `lost_bet_paid` is invisible to it (see `generator/FRAUD_PATTERNS.md`). Fixed in step 8 |
 | `LATE_BET` | `bets.placed_at > events.start_time` on any leg | high | Precision and recall 1.0 — the baseline is clean |
 | `STAKE_ANOMALY` | A stake at least 8× the player's average over their previous 50 bets, with at least 15 before it | medium | High recall; precision below 1 — honest high-rollers sometimes do this too |
 
@@ -976,7 +976,13 @@ grafana/dashboards/*.json
       annotations show the *last* value Grafana saw, so a crashed generator was
       reported "9 minutes behind" — a stopped service is now *Service down*'s job,
       and the value rules only judge numbers they have
-- [ ] 8. The learning loop: fix `SETTLEMENT_MISMATCH`, watch recall go to 1.0
+- [x] 8. The learning loop: fix `SETTLEMENT_MISMATCH`, watch recall go to 1.0.
+      The expected payout now comes from the result (won: stake × odds, lost:
+      nothing). Old rows are read again with `runner.py --rescan RULE_CODE`, which
+      sets `last_id` back to 0; `ON CONFLICT DO NOTHING` keeps it from doubling
+      alerts. On the 14-day seed: recall 0.333 → 1.000, precision still 1.000, and
+      the found overpayment 192 → 9,882 — the missed two thirds were the expensive
+      ones (`rules/README.md`, *Changing a rule*)
 - [ ] 9. Docs: this section, the quick start (two new URLs), `.env.example`
 
 ### Proof it works

@@ -1,5 +1,8 @@
 """The rules runner - run it:  cd rules && python runner.py
 
+After changing a rule:  python runner.py --rescan RULE_CODE  - the running runner
+then reads that rule's whole source table again, with the new version.
+
 Every RUN_EVERY_SECONDS it runs each detection rule once over the rows that have
 arrived since its last run, and writes what it finds into `alerts`.
 
@@ -14,6 +17,7 @@ Rules never read fraud_labels. That table is how planted fraud is scored afterwa
 (db/scoring.sql) - a rule that read it would be scoring itself.
 """
 
+import argparse
 import os
 import signal
 import sys
@@ -129,6 +133,19 @@ def run_rule(conn: psycopg.Connection, rule: Rule) -> Result:
     return Result(rule.code, scanned, created, upto)
 
 
+def rescan(conn: psycopg.Connection, code: str) -> None:
+    """Send a rule back to the first row. For after the rule has changed: rows it
+    already read are read again, by the new version. Alerts it already raised are
+    not doubled - ON CONFLICT DO NOTHING - and keep the details they were written with."""
+    if code not in {rule.code for rule in RULES}:
+        sys.exit(f"unknown rule {code!r} - known: {', '.join(r.code for r in RULES)}")
+    # Waits for a run in progress (it holds the row FOR UPDATE), so the run cannot
+    # overwrite the 0 with its own upto a moment later.
+    conn.execute(
+        "UPDATE rule_state SET last_id = 0, updated_at = now() WHERE rule_code = %s", (code,)
+    )
+
+
 def record(rule: Rule, result: Result) -> None:
     """Count a rule's run - only once its transaction has committed, so the
     metrics never show alerts that were rolled back."""
@@ -172,6 +189,17 @@ def nap(seconds: float) -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Antifraud Lab rules runner.")
+    parser.add_argument("--rescan", metavar="RULE_CODE",
+                        help="send one rule back to the first row, then exit; "
+                             "the running runner reads everything again on its next run")
+    args = parser.parse_args()
+    if args.rescan:
+        with psycopg.connect(DSN, options="-c timezone=UTC") as conn:
+            rescan(conn, args.rescan)
+        print(f"{args.rescan}: back to the first row - the next run reads it all again", flush=True)
+        return
+
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     if METRICS_PORT:

@@ -4,6 +4,7 @@ from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 
+import runner
 from tests.conftest import KICKOFF, alerts, make_bet, make_match, make_player, run, settle
 
 BEFORE = KICKOFF - timedelta(hours=1)
@@ -45,13 +46,35 @@ def test_a_cent_of_rounding_is_not_a_mismatch(conn):
     assert alerts(conn, "SETTLEMENT_MISMATCH") == []
 
 
-def test_a_lost_bet_that_was_paid_is_NOT_flagged_yet(conn):
-    """The known blind spot of the obvious rule (WHERE result = 'won'). Phase 9 step 8
-    fixes the rule - and this test turns around."""
+def test_a_lost_bet_paid_nothing_is_not_flagged(conn):
+    bet = make_bet(conn, make_player(conn), BEFORE, stake="10.00", odds="2.000")
+    settle(conn, bet, "lost", "0.00")
+    run(conn, "SETTLEMENT_MISMATCH")
+    assert alerts(conn, "SETTLEMENT_MISMATCH") == []
+
+
+def test_a_lost_bet_that_was_paid_is_flagged(conn):
+    """The blind spot of the first version (WHERE result = 'won'). Until phase 9
+    step 8 this test asserted the opposite."""
     bet = make_bet(conn, make_player(conn), BEFORE, stake="10.00", odds="2.000")
     settle(conn, bet, "lost", "15.00")
     run(conn, "SETTLEMENT_MISMATCH")
-    assert alerts(conn, "SETTLEMENT_MISMATCH") == []
+    [(_, _, details)] = alerts(conn, "SETTLEMENT_MISMATCH")
+    assert details["result"] == "lost"
+    assert Decimal(str(details["expected"])) == Decimal("0.00")
+    assert Decimal(str(details["difference"])) == Decimal("15.00")
+
+
+def test_a_rescan_reads_old_rows_again_without_doubling_alerts(conn):
+    player = make_player(conn)
+    settle(conn, make_bet(conn, player, BEFORE, stake="10.00", odds="2.000"), "lost", "15.00")
+    run(conn, "SETTLEMENT_MISMATCH")
+    runner.rescan(conn, "SETTLEMENT_MISMATCH")
+    again = run(conn, "SETTLEMENT_MISMATCH")
+    everything = conn.execute("SELECT count(*) FROM settlements").fetchone()[0]
+    assert again.scanned == everything             # the whole table, from the first row
+    mine = [a for a in alerts(conn, "SETTLEMENT_MISMATCH") if a[0] == player]
+    assert len(mine) == 1
 
 
 # ------------------------------------------------------------------------ LATE_BET
