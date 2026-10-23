@@ -1,0 +1,393 @@
+# Grafana alert rules, loaded at every start-up. Edited here, not in the UI (a
+# provisioned rule cannot be changed there); `docker compose restart grafana` to load.
+#
+# Two kinds, on two datasources - and they are not interchangeable:
+#
+#   per entity, on Postgres    "player 532 was paid 40.00 too much". One alert per
+#                              player / bet / device. Prometheus could not do this:
+#                              an id as a label is a time series per player.
+#   aggregate, on Prometheus   "LATE_BET detections dropped to zero", "the generator
+#                              is behind". Shape, never single entities.
+#
+# No contact point yet: alerts fire and show under Alerting -> Alert rules. Telegram
+# comes later as one contact point; the `severity` label is what it will route on.
+#
+# Each rule: A = the query, then expressions (B reduce, C threshold, or a math
+# expression). noDataState says what "no rows / no series" means - for a
+# per-entity rule it means "nothing to report", for a health rule it means "the
+# thing being watched has stopped", which must fire.
+
+apiVersion: 1
+
+groups:
+  # ------------------------------------------------------------------ fraud
+  - orgId: 1
+    name: fraud
+    folder: Antifraud Lab
+    interval: 1m
+    rules:
+      - uid: high-severity-detection
+        title: High-severity detection
+        condition: C
+        for: 0s
+        noDataState: OK                 # no new alerts = nothing to report
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: "Player {{ $labels.player }}: {{ $labels.rule_code }}"
+          description: >-
+            The rules flagged player {{ $labels.player }} with {{ $labels.rule_code }}
+            ({{ $values.B.Value }} alert(s) in the last 10 minutes). Look them up in
+            the admin panel, or on the Fraud dashboard.
+        data:
+          - refId: A
+            datasourceUid: postgres
+            relativeTimeRange: {from: 600, to: 0}
+            model:
+              refId: A
+              format: table
+              rawQuery: true
+              editorMode: code
+              # created_at, real time: "written in the last 10 minutes", which is
+              # what an alert about now is about
+              rawSql: |
+                SELECT player_id::text AS player, rule_code, count(*) AS alerts
+                FROM alerts
+                WHERE severity IN ('high', 'critical')
+                  AND created_at > now() - interval '10 minutes'
+                GROUP BY player_id, rule_code
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{evaluator: {type: gt, params: [0]}}]
+
+      - uid: big-payout-mismatch
+        title: Big payout mismatch
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bet {{ $labels.bet }}: paid {{ $values.B.Value }} {{ $labels.currency }} wrong"
+          description: >-
+            A won bet of player {{ $labels.player }} was paid {{ $values.B.Value }}
+            {{ $labels.currency }} more or less than stake x odds. Small mismatches are
+            only on the Fraud dashboard; this fires from 100 in the bet's currency.
+        data:
+          - refId: A
+            datasourceUid: postgres
+            relativeTimeRange: {from: 600, to: 0}
+            model:
+              refId: A
+              format: table
+              rawQuery: true
+              editorMode: code
+              rawSql: |
+                SELECT a.player_id::text AS player,
+                       a.details ->> 'bet_id' AS bet,
+                       b.currency,
+                       abs((a.details ->> 'difference')::numeric) AS difference
+                FROM alerts a
+                JOIN bets b ON b.id = (a.details ->> 'bet_id')::bigint
+                WHERE a.rule_code = 'SETTLEMENT_MISMATCH'
+                  AND a.created_at > now() - interval '10 minutes'
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{evaluator: {type: gt, params: [100]}}]
+
+      - uid: shared-device
+        title: Device shared by a third player
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "A device now has {{ $values.B.Value }} players"
+          description: >-
+            Device {{ $labels.device }} was just used by its third (or later) distinct
+            player. Two is common - households share a tablet; three starts to look
+            like one person with several accounts. The admin panel's Linked tab shows
+            who they are.
+        data:
+          - refId: A
+            datasourceUid: postgres
+            relativeTimeRange: {from: 1800, to: 0}
+            model:
+              refId: A
+              format: table
+              rawQuery: true
+              editorMode: code
+              # Only devices used in the last 30 minutes (simulated time, a few
+              # minutes behind the real clock), and only when the player who made
+              # it three first appeared on it within that window - so the alert
+              # resolves by itself half an hour later instead of firing for ever.
+              # Device ids are compared, never card fingerprints (Grafana cannot
+              # read those).
+              rawSql: |
+                WITH recent AS (
+                    SELECT DISTINCT device_id FROM sessions
+                    WHERE started_at > now() - interval '30 minutes'
+                ),
+                firsts AS (
+                    SELECT s.device_id, s.player_id, min(s.started_at) AS first_seen
+                    FROM sessions s JOIN recent USING (device_id)
+                    GROUP BY s.device_id, s.player_id
+                ),
+                ranked AS (
+                    SELECT device_id, first_seen,
+                           count(*) OVER (PARTITION BY device_id ORDER BY first_seen) AS nth
+                    FROM firsts
+                )
+                SELECT device_id::text AS device, max(nth) AS players
+                FROM ranked
+                WHERE nth >= 3 AND first_seen > now() - interval '30 minutes'
+                GROUP BY device_id
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{evaluator: {type: gt, params: [2]}}]
+
+  # ------------------------------------------------------- the lab's health
+  - orgId: 1
+    name: lab-health
+    folder: Antifraud Lab
+    interval: 1m
+    rules:
+      - uid: service-down
+        title: Service down
+        condition: C
+        for: 2m
+        # No `up` series at all means Prometheus has lost its targets - fire.
+        noDataState: Alerting
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} is down"
+          description: >-
+            Prometheus cannot reach {{ $labels.job }}'s metrics for 2 minutes: it has
+            stopped, or keeps crashing. `docker compose ps`, then
+            `docker compose logs {{ $labels.job }}`. The generator crashes like this
+            while Postgres is down, and recovers by itself once it is back.
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: {from: 600, to: 0}
+            # Prometheus writes up = 1 or 0 for every target at every scrape - so a
+            # dead service is a 0, not missing data
+            model: {refId: A, expr: "up", instant: true}
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{evaluator: {type: lt, params: [1]}}]
+
+      - uid: rules-runner-stale
+        title: Rules runner stale
+        condition: C
+        for: 0s                         # the 10 minutes are in the threshold already
+        # No data = the runner is not reporting at all: that is "Service down"'s
+        # job. Firing on no data here too would show the last value Grafana saw,
+        # long out of date, as if it were current.
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: "No successful rules run for {{ humanizeDuration $values.B.Value }}"
+          description: >-
+            The rules runner runs every minute; it has not finished a run for over 10
+            minutes, so no fraud is being detected. Check `docker compose logs rules`
+            - "database unavailable" means Postgres.
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: {from: 600, to: 0}
+            model: {refId: A, expr: "time() - rules_last_success_timestamp_seconds", instant: true}
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{evaluator: {type: gt, params: [600]}}]
+
+      - uid: generator-behind
+        title: Generator behind the real clock
+        condition: C
+        for: 5m
+        noDataState: OK                 # not reporting at all: "Service down" says so
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "The generator is {{ humanizeDuration $values.B.Value }} behind"
+          description: >-
+            5-10 minutes is normal - a tick is written once the tick after it has
+            ended. More than 20 for 5 minutes: it has stopped, or cannot keep up.
+            `docker compose logs generator`. (Right after a first start it is weeks
+            behind while it catches up - that fires too, and resolves once caught up.)
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: {from: 600, to: 0}
+            model: {refId: A, expr: "generator_lag_seconds", instant: true}
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{evaluator: {type: gt, params: [1200]}}]
+
+      - uid: api-errors
+        title: API errors
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ humanizePercentage $values.B.Value }} of API requests fail"
+          description: >-
+            More than 1% of API requests have been answered with a 5xx for 5 minutes.
+            /ready answering 503 counts too: that is the API saying it cannot reach
+            the database.
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: {from: 600, to: 0}
+            model:
+              refId: A
+              instant: true
+              # "or vector(0)": no 5xx at all is 0, not no data
+              expr: >-
+                (sum(rate(api_requests_total{status=~"5.."}[5m])) or vector(0))
+                / (sum(rate(api_requests_total[5m])) > 0 or vector(1))
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{evaluator: {type: gt, params: [0.01]}}]
+
+      - uid: api-slow
+        title: API slow
+        condition: C
+        for: 5m
+        noDataState: OK                 # no traffic = nothing slow
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.route }}: 99th percentile {{ humanizeDuration $values.B.Value }}"
+          description: >-
+            One request in a hundred on {{ $labels.route }} has taken longer than a
+            second, for 5 minutes.
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: {from: 600, to: 0}
+            model:
+              refId: A
+              instant: true
+              expr: >-
+                histogram_quantile(0.99, sum by (le, route)
+                (rate(api_request_duration_seconds_bucket[5m])))
+          - refId: B
+            datasourceUid: __expr__
+            model: {refId: B, type: reduce, expression: A, reducer: last}
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{evaluator: {type: gt, params: [1]}}]
+
+  # ------------------------------------------------------ detection volume
+  - orgId: 1
+    name: detection-volume
+    folder: Antifraud Lab
+    interval: 5m
+    rules:
+      - uid: detection-rate-shift
+        title: Detection rate shift
+        condition: D
+        for: 0s
+        noDataState: OK                 # the first two days there is no "yesterday"
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.rule_code }}: {{ $values.A.Value }} today, {{ $values.B.Value }} yesterday"
+          description: >-
+            Over the last 24 hours {{ $labels.rule_code }} raised {{ $values.A.Value }}
+            alerts, against {{ $values.B.Value }} in the 24 hours before. Dropping to
+            zero usually means the rule broke, not that fraud stopped; doubling means
+            something changed - in the data, or in the rule.
+        data:
+          # 24-hour windows, not 1 hour: a rule raises a handful an hour, and an hour
+          # with none is ordinary
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: {from: 600, to: 0}
+            model:
+              refId: A
+              instant: true
+              expr: "sum by (rule_code) (increase(rules_alerts_created_total[24h]))"
+          - refId: B
+            datasourceUid: prometheus
+            relativeTimeRange: {from: 600, to: 0}
+            model:
+              refId: B
+              instant: true
+              expr: "sum by (rule_code) (increase(rules_alerts_created_total[24h] offset 24h))"
+          # 1 when: today nothing although yesterday had some, or today more than
+          # double yesterday - and yesterday had at least 5, so 1 -> 3 is not news
+          - refId: D
+            datasourceUid: __expr__
+            model:
+              refId: D
+              type: math
+              expression: "(($A == 0) * ($B > 0)) + (($A > 2 * $B) * ($B >= 5))"

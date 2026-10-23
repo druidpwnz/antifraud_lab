@@ -819,9 +819,11 @@ that were paid, and recall goes to 1.0 on the next run.
 | Big payout mismatch | Postgres | a `SETTLEMENT_MISMATCH` over a money threshold |
 | Shared device | Postgres | a device gains a third distinct player (households make two common) |
 | Detection rate shift | Prometheus | a rule's detections per hour double, or drop to zero, against the day before |
+| Service down | Prometheus | `up == 0` for 2 minutes — one alert per service, named |
 | Rules runner stale | Prometheus | no successful run for 10 minutes |
 | Generator behind | Prometheus | the simulated clock more than 20 minutes behind the real one (5–10 is normal) |
-| API errors / latency | Prometheus | 5xx above 1% of requests, or p99 above 1 s, for 5 minutes |
+| API errors | Prometheus | 5xx above 1% of requests for 5 minutes |
+| API slow | Prometheus | p99 above 1 s on a route for 5 minutes |
 
 ### Dashboards
 
@@ -854,8 +856,15 @@ that were paid, and recall goes to 1.0 on the next run.
   stops it at start-up; a named volume avoids that.
 - **Provisioned dashboards are read-only in the UI.** Changes are made, exported and
   committed — or they vanish at the next restart.
-- **"No data" is not "OK".** An alert over a stopped service gets no data at all;
-  each alert says what no data means (for *rules runner stale*, it means firing).
+- **"No data" is not "OK" — and not a value either.** An alert over a stopped service
+  gets no data at all. Firing on it works, but the alert's text then shows the last
+  value Grafana saw, long out of date: a crashed generator said "9 minutes behind".
+  A stopped service is caught by *Service down* on Prometheus's own `up`, which is 0
+  — data — when a target cannot be reached; the other rules treat no data as OK.
+- **A first start is a flood.** The catch-up writes weeks of alerts in minutes, all
+  "new", and *High-severity detection* fires one instance per player — 983 at once.
+  Harmless in the UI; once Telegram is a contact point, the notification policy has
+  to group them, or the first start sends hundreds of messages.
 - **Inside the Postgres container nothing checks a password.** The official image
   trusts connections from `127.0.0.1` and the socket, so `docker compose exec
   postgres psql -U grafana_reader` gets in with any password, or none — found in
@@ -950,8 +959,23 @@ grafana/dashboards/*.json
       Rule colours validated for colour-blind separation on Grafana's dark
       background. Money is one currency at a time: amounts in UAH and EUR cannot be
       added. Catching up from 2026-09-01 now takes about 15 minutes (7½ weeks)
-- [ ] 7. Alert rules, provisioned — each one made to fire on purpose (stop the rules
-      runner, stop the generator, ...) and to resolve again
+- [x] 7. Alert rules, provisioned — each one made to fire on purpose (stop the rules
+      runner, stop the generator, ...) and to resolve again. `grafana/provisioning/
+      alerting/rules.yml`, 9 rules in 3 groups. Drills on a throwaway stack: the
+      catch-up fired *High-severity detection* (one instance per player), *Big payout
+      mismatch* ("Bet 20851: paid 131.15 EUR wrong") and *Generator behind* ("25d
+      behind"), which resolved by itself once caught up; three players logged into
+      one new device fired *Device shared*, resolved 30 minutes later; **Postgres
+      stopped** fired *Service down* (generator), *Rules runner stale* (10 m 48 s),
+      *API errors* (100%: `/ready` answers 503) and *API slow* (`/ready` waits 2 s
+      for the pool) — and the SQL rules showed `health=error` — all resolved within
+      10 minutes of Postgres coming back. *Detection rate shift* needs two days of
+      data, so its formula was run through Grafana's evaluation API on six made-up
+      cases, all right. *Device shared* costs 10 ms a minute: Postgres 18 skip-scans
+      the existing `(player_id, started_at)` index. Found in the drills: "no data"
+      annotations show the *last* value Grafana saw, so a crashed generator was
+      reported "9 minutes behind" — a stopped service is now *Service down*'s job,
+      and the value rules only judge numbers they have
 - [ ] 8. The learning loop: fix `SETTLEMENT_MISMATCH`, watch recall go to 1.0
 - [ ] 9. Docs: this section, the quick start (two new URLs), `.env.example`
 
