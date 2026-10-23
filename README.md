@@ -2,7 +2,8 @@
 
 A self-contained fraud-detection lab running on the home server: a generator that
 produces production-like betting and payment traffic with deliberately planted fraud,
-a REST API over it, an admin panel, and Grafana dashboards.
+a REST API over it, an admin panel, detection rules that find the fraud, and
+Prometheus and Grafana watching all of it.
 
 **Goal (revised):** depth in **REST API design**, **Python services**, and **CI/CD**.
 Advanced SQL is no longer the target — the rules layer stays deliberately thin.
@@ -19,22 +20,31 @@ cp .env.example .env
 docker compose up -d
 ```
 
-The first `up` builds three images and generates 14 days of history, about a
+The first `up` builds four images and generates 14 days of history, about a
 minute. Then the live generator catches up from 2026-09-01 to *now* — about 15
 minutes in late October, longer the later it is — and after that writes new data
-every five minutes, never ahead of the real clock.
+every five minutes, never ahead of the real clock. The rules runner follows it,
+turning planted fraud into alerts within a minute of it being written.
 
 | What | Where | Login |
 |---|---|---|
 | Admin panel | http://localhost:5000 | `admin` / `demo-admin-password-change-me` |
 | API, interactive docs | http://localhost:8000/docs | **Authorize** with `demo-full-key-change-me` |
+| Grafana — dashboards, alerts | http://localhost:3000 | `admin` / `demo-grafana-admin-password-change-me` |
+| Prometheus — targets, raw queries | http://localhost:9090 | — |
 | Database | `docker compose exec postgres psql -U antifraud -d antifraud` | — |
+| How good each rule is | `docker compose exec -T postgres psql -U antifraud -d antifraud < db/scoring.sql` | — |
+
+In Grafana: **Dashboards → Antifraud Lab** (Ops, Fraud, Scoring, Money) and
+**Alerting → Alert rules**. On the *Fraud* dashboard, put the panel's address in
+the *Admin panel* box at the top, and player and bet ids become links into it.
 
 From another machine on the LAN, use this machine's address instead of `localhost`.
 
 ```bash
 docker compose ps                    # everything Up / healthy; migrate and seed Exited (0)
 docker compose logs -f generator     # watch it catch up
+docker compose logs -f rules         # one line per rule that found new rows
 docker compose down                  # stop, KEEP the data
 docker compose down -v               # stop and DELETE the data - the next up starts fresh
 git pull && docker compose up -d --build     # after an update
@@ -42,14 +52,19 @@ git pull && docker compose up -d --build     # after an update
 
 **Before anyone but you can reach it,** change the passwords and keys in `.env` —
 the demo values are public, in this repo. Do it before the first `up`:
-`POSTGRES_PASSWORD` is only used when the database is created, so changing it later
-does nothing until `down -v`. A new panel user:
+`POSTGRES_PASSWORD` and `GRAFANA_ADMIN_PASSWORD` are only used when their database
+is created, so changing them later does nothing until `down -v` (Grafana's can be
+reset: `docker compose exec grafana grafana cli admin reset-admin-password <new>`). A new panel user:
 `docker compose exec admin flask --app app hash-password <name>`, the printed line
 into `ADMIN_USERS` (in single quotes), then `docker compose up -d`.
 
 **After `git pull`,** compare `.env.example` with your `.env`
 (`diff .env.example .env`): new variables are not copied over by themselves, and
 compose refuses to start without them.
+
+**The first start is a flood.** The catch-up writes weeks of fraud in minutes, so
+*High-severity detection* fires for about 1,500 players at once. It settles about
+10 minutes after the catch-up ends; from then on an alert means something new.
 
 Developing without Docker — venv, local Postgres, `uvicorn --reload`, `flask run` —
 is in the service READMEs: [`api/`](api/README.md), [`admin/`](admin/README.md),
@@ -65,13 +80,13 @@ is in the service READMEs: [`api/`](api/README.md), [`admin/`](admin/README.md),
 | 1 | Schema — 14 tables + `sim_state` | **done** |
 | 2 | Backfill generator | **done** |
 | 3 | Fraud injector | **3 patterns done** |
-| 4 | Live generator | **done** (no metrics yet) |
-| 5 | Thin alerting (fills `alerts`) | **part of phase 9** — its first steps |
+| 4 | Live generator | **done** — metrics in phase 9 |
+| 5 | Thin alerting (fills `alerts`) | **done** — as the start of phase 9 |
 | 6 | API — FastAPI | **done** — 15 endpoints, 140 tests, Postman collection |
 | 7 | Admin panel — Flask + Jinja + HTMX, over the API | **done** — players, bets, events; 140 tests |
-| 8 | Compose, for real | **done** — one `docker compose up -d`, six services |
-| 9 | Detection rules, Prometheus, Grafana — fraud alerting | **next** — planned |
-| 10 | CI/CD — GitHub Actions | not started |
+| 8 | Compose, for real | **done** — one `docker compose up -d`, six services (nine since phase 9) |
+| 9 | Detection rules, Prometheus, Grafana — fraud alerting | **done** — 3 rules, 4 dashboards, 9 alerts |
+| 10 | CI/CD — GitHub Actions | **next** |
 
 Done so far: 14-table schema with constraints that hold, a seeded reproducible
 backfill (90 days = 9.7k players, 650k bets, ~10 min), three planted fraud patterns
@@ -85,6 +100,12 @@ events, plus idempotent risk checks, with 140 tests and a Postman collection.
 The admin panel is in [`admin/`](admin/README.md): a read-only back office over the
 API — players with their money, logins and linked accounts, every bet, every match —
 with a login, 140 tests and the API key kept out of the browser.
+
+Detection is in [`rules/`](rules/README.md): three rules, one SQL file each, run
+every minute over the rows that arrived since the last run, and scored against the
+planted ground truth — precision 1.0 and recall 1.0 on two of them. Prometheus
+watches every service; Grafana has four dashboards and nine alert rules, all
+provisioned from files in [`grafana/`](grafana/dashboards/README.md).
 
 All of it runs with one `docker compose up -d` — see [Quick start](#quick-start).
 
@@ -759,7 +780,7 @@ with phase 5.
 
 ---
 
-## Phase 9 — Detection, Prometheus, Grafana: where fraud becomes an alert (next)
+## Phase 9 — Detection, Prometheus, Grafana: where fraud becomes an alert (done)
 
 **The goal:** planted fraud is found by simple rules, shows up on Grafana dashboards
 within minutes, and fires alerts — and the whole lab is watched: a stopped generator,
@@ -778,6 +799,14 @@ to show.
                                                              │ alert rules
  generator, api, rules ──/metrics──> prometheus <──queries───┘
 ```
+
+### What runs — three more services
+
+| Service | Image | Runs | Networks | Published |
+|---|---|---|---|---|
+| `rules` | `antifraud/rules` | always — every rule once a minute, into `alerts` | `db` | — |
+| `prometheus` | `prom/prometheus:v3.15.0` | always — scrapes generator, api, rules every 15 s | `db`, `web` | `PROMETHEUS_PORT`, 9090 |
+| `grafana` | `grafana/grafana:13.2.3` | always — dashboards and alert rules from `grafana/` | `db`, `web` | `GRAFANA_PORT`, 3000 |
 
 ### Decisions
 
@@ -803,13 +832,14 @@ to show.
 
 | Rule | Finds | Severity | Expected |
 |---|---|---|---|
-| `SETTLEMENT_MISMATCH` | `ABS(payout - stake * total_odds) > 0.01 WHERE result = 'won'` — written the obvious way on purpose | high | Precision 1.0, recall about 0.33 — `lost_bet_paid` is invisible to it (see `generator/FRAUD_PATTERNS.md`). Fixed in step 8 |
+| `SETTLEMENT_MISMATCH` | First `ABS(payout - stake * total_odds) > 0.01 WHERE result = 'won'` — written the obvious way on purpose. Since step 8: the payout against what the result is worth — stake × odds when won, nothing when lost | high | First precision 1.0, recall about 0.33 — `lost_bet_paid` is invisible to it (see `generator/FRAUD_PATTERNS.md`). After the fix both 1.0 |
 | `LATE_BET` | `bets.placed_at > events.start_time` on any leg | high | Precision and recall 1.0 — the baseline is clean |
 | `STAKE_ANOMALY` | A stake at least 8× the player's average over their previous 50 bets, with at least 15 before it | medium | High recall; precision below 1 — honest high-rollers sometimes do this too |
 
 Then the learning loop, as a step of its own: the *Scoring* dashboard shows
 `SETTLEMENT_MISMATCH` missing two thirds, the rule is fixed to cover losing bets
-that were paid, and recall goes to 1.0 on the next run.
+that were paid, and recall goes to 1.0 once the old rows are read again
+(`runner.py --rescan`).
 
 ### Alerts
 
@@ -862,7 +892,8 @@ that were paid, and recall goes to 1.0 on the next run.
   A stopped service is caught by *Service down* on Prometheus's own `up`, which is 0
   — data — when a target cannot be reached; the other rules treat no data as OK.
 - **A first start is a flood.** The catch-up writes weeks of alerts in minutes, all
-  "new", and *High-severity detection* fires one instance per player — 983 at once.
+  "new", and *High-severity detection* fires one instance per player — 983 at once
+  in step 7, about 1,500 since step 8 taught `SETTLEMENT_MISMATCH` about lost bets.
   Harmless in the UI; once Telegram is a contact point, the notification policy has
   to group them, or the first start sends hundreds of messages.
 - **Inside the Postgres container nothing checks a password.** The official image
@@ -983,17 +1014,56 @@ grafana/dashboards/*.json
       alerts. On the 14-day seed: recall 0.333 → 1.000, precision still 1.000, and
       the found overpayment 192 → 9,882 — the missed two thirds were the expensive
       ones (`rules/README.md`, *Changing a rule*)
-- [ ] 9. Docs: this section, the quick start (two new URLs), `.env.example`
+- [x] 9. Docs: this section, the quick start (Grafana, Prometheus, scoring, the
+      first-start flood), `.env.example` — and *Proof it works* below, run on a
+      fresh clone
 
 ### Proof it works
 
-- From a fresh clone: `cp .env.example .env && docker compose up -d` — Grafana opens
-  with four dashboards already there, and data in them.
-- Every Prometheus target `UP`; no metric has a label with an id in it
-  (`count by (__name__)` stays small).
-- The *Scoring* dashboard agrees with `db/scoring.sql` run by hand.
-- Each alert has been seen firing and resolving.
+Run on a fresh `git clone` of the step 8 commit, on a throwaway stack, on 2026-10-23:
+
+- `cp .env.example .env && docker compose up -d --build`: every service up in 59 s;
+  Grafana has the four dashboards in *Antifraud Lab* and all nine alert rules,
+  with data in the dashboards from the seed on. The catch-up from 2026-09-01 took
+  16 minutes.
+- Every Prometheus target `UP` — generator, api, rules, Prometheus itself. 955
+  series in all; no label is an id (`route` has templates only).
+- The *Scoring* dashboard and `db/scoring.sql` agree, row for row:
+
+  | Rule | Planted | Detected | Caught | False alarms | Precision | Recall |
+  |---|---|---|---|---|---|---|
+  | `LATE_BET` | 844 | 844 | 844 | 0 | 1.000 | 1.000 |
+  | `SETTLEMENT_MISMATCH` | 2,215 | 2,215 | 2,215 | 0 | 1.000 | 1.000 |
+  | `STAKE_ANOMALY` | 2,559 | 2,409 | 2,333 | 76 | 0.968 | 0.912 |
+
+- Every panel of every dashboard answers, through Grafana's API: no errors, no
+  empty panels.
+- Each alert has been seen firing and resolving (step 7) — except *Detection rate
+  shift*, whose formula was checked on made-up numbers; for real it needs two days
+  of history.
 - `invariants.sql` still 12/12: the rules only ever write to `alerts` and `rule_state`.
+
+### What was found by testing, not by planning
+
+- A local database owner may not create roles — `grafana_reader` moved out of the
+  migration into `db/migrate.py`, which only sets it up under compose (step 1).
+- `docker compose exec postgres psql` gets in with any password: the image trusts
+  connections from inside the container. Logins are tested over the network (step 1).
+- Two wrong payouts to one player in the same second became one alert — `alerts`
+  needed `source_id` in its unique key (step 2, migration 006).
+- FastAPI 0.141 nests routers, so the matched route lacks its `/v1` — route labels
+  come from the OpenAPI document instead (step 3).
+- A stopped service has no data, and an alert text over no data shows the last value
+  Grafana saw — "9 minutes behind" for a crashed generator. *Service down*, on
+  Prometheus's own `up`, was added for it (step 7).
+- A fixed rule only sees rows after the fix: `rule_state` is already past the old
+  ones. `runner.py --rescan` reads them again; the two thirds it had missed were also
+  the expensive two thirds — 9,882 overpaid against 192 (step 8).
+- A test database is not migrated by compose: the scoring tests failed on a
+  `antifraud_test` one migration behind (step 8).
+- On a first start the API and the generator are `up = 0` for a scrape or two while
+  they wait for the database and the seed. *Service down* goes *pending* and never
+  fires — its `for: 2m` is what keeps a normal start quiet (step 9).
 
 ---
 
