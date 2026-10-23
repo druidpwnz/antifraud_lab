@@ -9,6 +9,7 @@
 #     API         http://<this machine>:8000/docs    (port: API_PORT in .env)
 #     panel       http://<this machine>:5000         (port: PANEL_PORT in .env)
 #     Prometheus  http://<this machine>:9090         (port: PROMETHEUS_PORT in .env)
+#     Grafana     http://<this machine>:3000         (port: GRAFANA_PORT in .env)
 #
 #     docker compose ps                      what is running, and is it healthy
 #     docker compose logs -f generator       follow one service
@@ -217,6 +218,47 @@ services:
     networks: [db, web]
     logging: *logging
 
+  # Dashboards and alerts. Datasources (and, from step 6, dashboards and alert
+  # rules) come from files in grafana/provisioning, so a fresh clone gets them all.
+  grafana:
+    image: grafana/grafana:13.2.3
+    environment:
+      # Used only when Grafana creates its database, on the first start - like
+      # POSTGRES_PASSWORD. Later: docker compose exec grafana grafana cli admin reset-admin-password <new>
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env - see .env.example}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"     # no usage stats sent to Grafana Labs
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"      # no plugin downloads at every start
+      # read by provisioning/datasources/datasources.yml
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env - cp .env.example .env}
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:?set GRAFANA_DB_PASSWORD in .env - see .env.example}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana     # its own database: users, settings, alert state
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully   # grafana_reader exists
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+      start_interval: 1s
+    restart: unless-stopped
+    # db: Postgres and Prometheus. web: the published port, and the internet for
+    # notifications later (Telegram).
+    networks: [db, web]
+    logging: *logging
+
 networks:
   # internal: no route out of this network - Postgres and the generator need
   # nothing from the internet, and nothing outside can reach in.
@@ -229,3 +271,4 @@ networks:
 volumes:
   pgdata:
   prometheus-data:
+  grafana-data:

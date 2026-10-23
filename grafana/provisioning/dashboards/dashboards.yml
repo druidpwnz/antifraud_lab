@@ -1,0 +1,18 @@
+# Where Grafana finds its dashboards: the JSON files in grafana/dashboards/ of this
+# repo, mounted at /etc/grafana/dashboards. Checked every 30 s, so an edited file
+# shows up without a restart.
+#
+# allowUiUpdates: false - a provisioned dashboard cannot be saved from the UI. To
+# change one: edit it in the UI, Export -> Export as JSON, save over the file here,
+# commit. Like the Postman collection: what is not in the repo does not exist.
+
+apiVersion: 1
+
+providers:
+  - name: antifraud-lab
+    folder: Antifraud Lab
+    type: file
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards

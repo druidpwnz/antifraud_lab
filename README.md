@@ -793,7 +793,7 @@ to show.
 | Notifications | None yet: alerts fire and show in Grafana's UI | Telegram comes later — then a bot token in `.env` and one provisioned contact point |
 | Grafana's database access | Direct, not through the API — with a read-only Postgres role `grafana_reader`: `SELECT` only, and not on the columns the API never returns either (`payment_methods.fingerprint`). Set up by `db/migrate.py` when `GRAFANA_DB_PASSWORD` is set — role, password and grants, on every run. Not in a migration | Dashboards ask for aggregates over time, which the API was not built for; scoring needs `fraud_labels`, which the API must never expose. The panel is a product and goes through the API; Grafana is analytics and reads the data, read-only. A typo in Grafana's SQL editor cannot `DELETE` anything, and a card fingerprint is no easier to get through Grafana than through the API. A role belongs to the whole server, and a local database owner may not create one |
 | Provisioning | Datasources, dashboards (JSON) and alert rules (YAML) are files in `grafana/`, loaded at start-up | Nothing lives only inside Grafana's database; a fresh clone gets the same dashboards. Edit in the UI, export over the file, commit — like the Postman collection |
-| Images | `prom/prometheus` and `grafana/grafana-oss`, exact versions pinned | Same reason as `postgres:18` — an upgrade is a decision, not a surprise |
+| Images | `prom/prometheus` and `grafana/grafana` (the OSS image — `grafana-oss` stopped getting releases in June 2026), exact versions pinned | Same reason as `postgres:18` — an upgrade is a decision, not a surprise |
 | Ports | Grafana published on `GRAFANA_PORT` (3000), Prometheus on `PROMETHEUS_PORT` (9090), both from `.env`. Grafana's admin password in `.env` | The Prometheus UI (targets, raw queries) is worth having in a lab |
 | Storage | Volumes `prometheus-data` (30 days of metrics) and `grafana-data` | Metrics survive `down`; `down -v` clears them with everything else |
 | Networks | `rules`, Prometheus and Grafana on `db`; Prometheus and Grafana also on `web` (published ports; Telegram later needs the internet) | The admin panel still cannot reach Postgres |
@@ -847,6 +847,9 @@ that were paid, and recall goes to 1.0 on the next run.
   caught up they agree within 10 minutes; during the catch-up they do not.
 - **The first rules run scans everything** — 14 days of backfill plus the catch-up.
   `rule_state` makes the next run cheap; the first one is measured.
+- **`GRAFANA_ADMIN_PASSWORD` only counts once** — like `POSTGRES_PASSWORD`: Grafana
+  reads it when it creates its own database, on an empty `grafana-data` volume.
+  Later: `docker compose exec grafana grafana cli admin reset-admin-password <new>`.
 - **Grafana runs as uid 472.** A bind-mounted data folder owned by someone else
   stops it at start-up; a named volume avoids that.
 - **Provisioned dashboards are read-only in the UI.** Changes are made, exported and
@@ -928,7 +931,15 @@ grafana/dashboards/*.json
       queries answer — rows per second by table, the generator's lag, alerts per rule,
       seconds since the rules last succeeded; 932 series in all; data survives a
       restart
-- [ ] 5. Grafana in compose, datasources provisioned — Explore answers from both
+- [x] 5. Grafana in compose, datasources provisioned — Explore answers from both:
+      `grafana/grafana:13.2.3`, datasources from `grafana/provisioning/datasources/`
+      with the reader's password from the environment, not the file. Checked through
+      Grafana's own API: both datasources healthy, PromQL and SQL answer; through the
+      Postgres datasource fingerprints, `DELETE` and `UPDATE` are refused; a
+      provisioned datasource cannot be deleted from the UI or API; its password is
+      never sent back; no plugins downloaded at start-up; a clean start logs no
+      errors (empty `plugins/` and `alerting/` folders, and the dashboard provider,
+      are there so Grafana does not complain about them)
 - [ ] 6. Dashboards: *Ops*, *Fraud*, *Scoring*, *Money*
 - [ ] 7. Alert rules, provisioned — each one made to fire on purpose (stop the rules
       runner, stop the generator, ...) and to resolve again

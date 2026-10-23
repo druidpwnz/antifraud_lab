@@ -1,0 +1,38 @@
+# Grafana's two datasources, loaded at every start-up. Edited here, not in the UI -
+# `editable: false` makes the UI say so, and a change made there would vanish at
+# the next restart anyway.
+#
+# $VARIABLES come from Grafana's own environment (docker-compose.yml passes them),
+# so no password is written in this file.
+
+apiVersion: 1
+
+datasources:
+  # Metrics - the services' health and rates. Aggregates only, never per entity.
+  - name: Prometheus
+    uid: prometheus                 # dashboards and alert rules refer to this, not the name
+    type: prometheus
+    access: proxy                   # Grafana's server queries it, not the browser
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 15s             # = scrape_interval, so $__rate_interval is right
+
+  # The data itself - history, single players, scoring - read-only. grafana_reader
+  # may SELECT and nothing else, and not even that on card fingerprints
+  # (db/migrate.py). Simulated time: plot window_start, placed_at... not created_at.
+  - name: Postgres
+    uid: postgres
+    type: grafana-postgresql-datasource
+    url: postgres:5432
+    user: grafana_reader
+    editable: false
+    jsonData:
+      database: $POSTGRES_DB
+      sslmode: disable              # inside the internal db network only
+      postgresVersion: 1800
+      timescaledb: false
+      maxOpenConns: 5
+    secureJsonData:
+      password: $GRAFANA_DB_PASSWORD
