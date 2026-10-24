@@ -86,7 +86,7 @@ is in the service READMEs: [`api/`](api/README.md), [`admin/`](admin/README.md),
 | 7 | Admin panel — Flask + Jinja + HTMX, over the API | **done** — players, bets, events; 140 tests |
 | 8 | Compose, for real | **done** — one `docker compose up -d`, six services (nine since phase 9) |
 | 9 | Detection rules, Prometheus, Grafana — fraud alerting | **done** — 3 rules, 4 dashboards, 9 alerts |
-| 10 | CI/CD — GitHub Actions | **next** |
+| 10 | CI/CD — GitHub Actions | **next** — planned |
 
 Done so far: 14-table schema with constraints that hold, a seeded reproducible
 backfill (90 days = 9.7k players, 650k bets, ~10 min), three planted fraud patterns
@@ -1067,35 +1067,116 @@ Run on a fresh `git clone` of the step 8 commit, on a throwaway stack, on 2026-1
 
 ---
 
-## Phase 10 — CI/CD with GitHub Actions
+## Phase 10 — CI/CD with GitHub Actions (next)
 
-Workflows in `.github/workflows/`. Runs on every push and on every pull request to
-`main`; a red check blocks the merge.
+**The goal:** every push is checked by GitHub — lint, a secret scan, every test
+suite, and the whole stack started with compose the way it runs at home. A green
+`main` becomes four images on `ghcr.io`, and the home server moves to them by
+itself within minutes. A red one never leaves GitHub.
 
-### CI — prove it works, on every push
+```
+ push ──> CI (GitHub's runners, thrown away after each job)
+           checks (lint, secrets, admin) · api · rules · stack (compose, end to end)
+             │ all green, on main only
+             v
+          images ──> ghcr.io/druidpwnz/antifraud-{generator,api,admin,rules}:<sha>, :main
+                        ^
+ home server ── every 5 min: "is :main newer?" ── pull, check out that commit, up -d
+```
 
-- [ ] **lint** — `ruff` over `generator/`, `api/`, `admin/`
-- [ ] **generator** — a `postgres` service container; apply every migration, run a
-      short backfill (`DAYS=3`), then
-      `psql -v ON_ERROR_STOP=1 -f db/tests/invariants.sql` — it already raises on
-      failure, so it needs no wrapper script
-- [ ] **api** — `pytest` in `api/` against its own `antifraud_test` in the service container
-- [ ] **admin** — `pytest` in `admin/`; needs no database or API, they are mocked
-- [ ] **end to end** — start the API on the backfilled database, then run the Postman
-      collection with Newman. Newman's non-zero exit on any failed check fails the job
+**The repo will be public later.** Every workflow is written as if it already were:
+a stranger's pull request runs only on GitHub's throwaway machines, never with a
+secret, never anywhere near the home server.
 
-### CD — ship it, on `main` only
+### Decisions
 
-- [ ] **build and push images** — one per service (generator, api, admin) to
-      `ghcr.io`, tagged with the commit SHA and `latest`. Needs the Dockerfiles from
-      phase 8, so this job comes after it
-- [ ] **deploy** — open question: the home server is not reachable from GitHub's
-      runners. Options: a self-hosted runner on the server pulling the new images, or
-      a scheduled `docker compose pull && up -d` on the server itself. Decide when
-      phase 8 is running
+| Topic | Decision | Why |
+|---|---|---|
+| Deploy | **Pull, not push.** A systemd timer on the server checks `ghcr.io` every 5 minutes; when `:main` is newer, it checks out that commit, pulls its images and runs `docker compose up -d` | Nothing on the server listens and nothing from GitHub runs there. A self-hosted runner on a public repo would run strangers' pull requests on the home server — Docker access is root, `.env` and the LAN are right there. GitHub advises self-hosted runners for private repos only |
+| What the server runs | The commit an image was built from (`org.opencontainers.image.revision`), not whatever `main` is in git | The compose file, Grafana's files and the images always come from the same commit — one that passed CI. Images take minutes to build; `git pull` alone would run new config with old images in between |
+| Images | Public on `ghcr.io`, one per service we build, tagged with the full commit SHA and `main`. `linux/amd64` (the home server is x86_64) | The image that passed the tests is the image that runs. Public: no token on the server, and the code inside is the code the repo will publish. No passwords in any image — they stay in `.env` |
+| Compose | `image: ghcr.io/druidpwnz/antifraud-api:${IMAGE_TAG:-local}` next to the existing `build:` | Locally nothing changes: `up --build` builds `:local`. The server sets `IMAGE_TAG` and never builds |
+| Which version runs | Each service exports `antifraud_build_info{version="<sha>"}`; the *Ops* dashboard shows it | No runner means no deploy in the Actions tab — the lab says itself what it runs |
+| Runners | GitHub-hosted `ubuntu-24.04`, Python 3.14, `postgres:18` service containers | The same Postgres as compose. Throwaway machines are what makes running pull requests safe |
+| Permissions | `contents: read` for every job; `packages: write` only for the image job; never `pull_request_target`; image and deploy only on a push to `main` of this repo, not a fork | Least privilege, written down per job. `pull_request_target` runs a fork's code with this repo's secrets — the classic way public repos get burgled |
+| Actions | Pinned to a full commit SHA, the version in a comment | A tag can be moved to other code; a SHA cannot |
+| Lint | `ruff check`, version pinned, config in `ruff.toml` at the root, over generator, api, admin, rules. No reformatting | Finds real mistakes (unused imports, undefined names, bare `except`); a mass reformat would bury every later diff |
+| Secret scan | `gitleaks` over the **whole history**, every push | Once public, every old commit is public too. It has to be clean before, not only from now on |
+| Git flow | Straight to `main` while private: CI on every push, images only when it is green. Once public: branch protection, changes through pull requests | On a free private repo a red check cannot block anything; on a public one it can |
+| Cost | **$0, and it has to stay $0.** Linux runners only. Private: 2,000 minutes a month; each job is billed separately and rounded up to a whole minute, so a push costs about 12–15 — some 130 pushes a month. Public: unlimited. Public images on `ghcr.io` are free. No payment method on the GitHub account (or an Actions budget of $0): when minutes run out, workflows stop until the next month instead of costing anything | Saving minutes: a push that changes only `.md` files runs no CI; a newer push cancels the run of an older one on the same branch; the small checks (lint, secrets, admin tests) share one job |
 
-The generator job is the honest version of "I know CI/CD": a pipeline that starts a
-real database, generates real data, and asserts something that can actually break.
+### CI — on every push and every pull request
+
+| Job | What it proves | How |
+|---|---|---|
+| checks | no obvious mistakes; no password or key anywhere in the history; the panel's 140 tests | `ruff check`; `gitleaks` over a full clone; pytest in `admin/` (the API is mocked, no database) — one job, they are quick |
+| api | 148 tests | pytest against a `postgres:18` service, migrated |
+| rules | 25 tests | pytest against a `postgres:18` service, migrated |
+| **stack** | it works together, the way it runs at home | below |
+
+The stack job is the one that matters most:
+
+1. `cp .env.example .env`, `docker compose up -d --build --wait` — everything but the
+   live generator. The seed is deterministic, so the Postman ids match
+2. `invariants.sql` — 12 checks
+3. **Newman**: the Postman collection against the API — 36 requests, 60 assertions
+4. **The scoring gate**: one rules run, then `db/tests/scoring_gate.sql` raises if
+   `LATE_BET` or `SETTLEMENT_MISMATCH` recall drops below 1.0, or `STAKE_ANOMALY`
+   below 0.85 — a rule that stops catching fraud fails the build
+5. The live generator for 60 seconds of catch-up, then `invariants.sql` again — the
+   live code, not only the backfill
+6. Grafana has its 4 dashboards and 9 alert rules; every Prometheus target is `UP`
+7. On failure, every container's logs are printed. `down -v` at the end
+
+### Traps to plan for
+
+- **A fork's pull request has no secrets and must not need any.** Nothing in CI may
+  depend on one — the demo `.env.example` is enough to run all of it.
+- **The catch-up in CI.** The generator would run from 2026-09-01 to now — 15 minutes
+  of a runner. CI starts everything but the generator, and gives it 60 seconds.
+- **`docker compose pull` with `build:` services** tries to pull `:local` on a dev
+  machine. Pulling is only ever done on the server, with `IMAGE_TAG` set.
+- **A first deploy is a first start**: the server's data stays (no `down -v` in any
+  script, ever), only containers are replaced; `migrate` applies what is new.
+- **Rollback is a pinned version**: stop the timer, run the update script with an
+  older SHA. Otherwise the timer moves it back to `:main` in 5 minutes.
+
+### Layout
+
+```
+.github/workflows/ci.yml        lint, secrets, unit tests, stack - every push and PR
+.github/workflows/images.yml    build and push - after CI is green on main
+ruff.toml
+db/tests/scoring_gate.sql       recall floors per rule; raises below them
+deploy/update.sh                on the server: newer :main? check out, pull, up -d
+deploy/antifraud-update.{service,timer}   systemd, every 5 minutes
+```
+
+### Build order — one step at a time, reviewed before the next
+
+- [ ] 1. Clean-up and lint: remove the three files committed by mistake (`26.2.2`,
+      `*_test_result.txt`), `ruff.toml`, fix what ruff finds; run `gitleaks` over the
+      history by hand
+- [ ] 2. CI, first half: checks (lint, secrets, admin), api, rules — the first green
+      check on GitHub. Check first: no payment method on the GitHub account
+- [ ] 3. CI, the stack job: compose, invariants, Newman, the scoring gate, the live
+      generator, Grafana and Prometheus
+- [ ] 4. Images: `build_info` metric and the version on the Ops dashboard; image
+      names in compose; build and push on green `main`; packages made public
+- [ ] 5. Deploy: `deploy/update.sh` and the systemd timer, installed on the home
+      server; a change pushed from the laptop shows up on the server by itself
+- [ ] 6. Docs: this section, the quick start, and a *Going public* checklist —
+      branch protection, approval for first-time contributors' workflows, GitHub
+      secret scanning, Dependabot
+
+### Proof it works
+
+- A push with a failing test, a ruff error, or a weakened rule is red — and no
+  image is built.
+- A push to `main` that is green shows up on the home server within about 15
+  minutes, with no command typed there; the Ops dashboard shows the new SHA.
+- A pull request from a fork runs CI and has no access to anything else.
+- Rolling back to the previous SHA and forward again works, data intact.
 
 ---
 
