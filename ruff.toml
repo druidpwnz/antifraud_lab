@@ -1,0 +1,28 @@
+# Ruff - the linter CI runs over every Python file:  ruff check
+# Checks only; nothing here reformats code. The version is pinned in
+# requirements-lint.txt, which CI installs too, so an upgrade cannot change the
+# rules unseen.
+
+target-version = "py314"
+line-length = 120
+# Where our own modules live, so imports are grouped right: the generator's flat
+# modules (config, db, helpers...) are ours, and the db/ folder at the root is not
+# a Python package.
+src = ["generator", "api", "admin", "rules"]
+
+[lint]
+# Chosen by hand rather than ruff's defaults, which change between versions.
+select = [
+    "F",    # pyflakes: unused imports and variables, undefined names
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "B",    # bugbear: likely bugs - mutable defaults, loop variables in closures
+    "I",    # imports sorted and grouped
+    "UP",   # older syntax that Python 3.14 has a better form for
+]
+
+[lint.flake8-bugbear]
+# FastAPI's way of declaring parameters: a call in the default is the point.
+extend-immutable-calls = [
+    "fastapi.Depends", "fastapi.Query", "fastapi.Header", "fastapi.Path", "fastapi.Security",
+]

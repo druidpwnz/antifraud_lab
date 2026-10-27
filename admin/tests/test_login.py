@@ -12,7 +12,6 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from app.auth import hash_password, parse_users, safe_next
 from tests.conftest import HEALTHY_API, TEST_PASSWORD, TEST_USER, csrf_token_from, login
 
-
 # ---------------------------------------------------- logged out: what you can reach
 
 def test_every_page_needs_a_login(make_client):

@@ -12,7 +12,7 @@ the rules see only the rows the test makes.
 import itertools
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import runner  # noqa: E402
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "dbname=antifraud_test")
-KICKOFF = datetime(2026, 8, 20, 19, 0, tzinfo=timezone.utc)
+KICKOFF = datetime(2026, 8, 20, 19, 0, tzinfo=UTC)
 
 _teams = itertools.count(1)
 

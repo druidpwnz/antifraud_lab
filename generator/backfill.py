@@ -11,7 +11,6 @@ import events
 import helpers
 import tick
 
-
 random.seed(config.SEED)
 
 end = config.END

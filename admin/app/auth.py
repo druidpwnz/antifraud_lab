@@ -21,8 +21,7 @@ from datetime import timedelta
 from urllib.parse import urlsplit
 
 import click
-from flask import (Blueprint, Flask, current_app, redirect, render_template, request,
-                   session, url_for)
+from flask import Blueprint, Flask, current_app, redirect, render_template, request, session, url_for
 from flask_login import LoginManager, UserMixin, current_user, login_user, logout_user
 from flask_wtf import FlaskForm
 from flask_wtf.csrf import CSRFProtect

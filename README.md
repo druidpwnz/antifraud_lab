@@ -1154,9 +1154,16 @@ deploy/antifraud-update.{service,timer}   systemd, every 5 minutes
 
 ### Build order — one step at a time, reviewed before the next
 
-- [ ] 1. Clean-up and lint: remove the three files committed by mistake (`26.2.2`,
+- [x] 1. Clean-up and lint: remove the three files committed by mistake (`26.2.2`,
       `*_test_result.txt`), `ruff.toml`, fix what ruff finds; run `gitleaks` over the
-      history by hand
+      history by hand — ruff 0.17.0 with rules chosen by hand (pyflakes, pycodestyle,
+      bugbear, imports, pyupgrade), FastAPI's `Depends()`/`Query()` declared as
+      intended. It found one real leftover (an unused `RETURNING id` in
+      `payments.py`) and about 40 style fixes, most of them automatic. After them: API
+      148, rules 25, admin 141 tests pass, `invariants.sql` 12/12, and a 14-day
+      backfill is byte-for-byte the same as before them. `gitleaks` v8.30.1 over all
+      41 commits: one finding, an example `Idempotency-Key` UUID in the API README —
+      allowed by its fingerprint in `.gitleaksignore`; no real secret, ever
 - [ ] 2. CI, first half: checks (lint, secrets, admin), api, rules — the first green
       check on GitHub. Check first: no payment method on the GitHub account
 - [ ] 3. CI, the stack job: compose, invariants, Newman, the scoring gate, the live

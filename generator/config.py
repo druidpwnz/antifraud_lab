@@ -1,7 +1,7 @@
 # all numbers and lists in one place
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # libpq connection string. Unset: the local database, as before. In a container,
 # compose sets DATABASE_URL="" and passes PGHOST, PGUSER, PGPASSWORD, PGDATABASE -
@@ -12,7 +12,7 @@ SEED = 42
 
 # The simulation ends at a FIXED moment, never datetime.now().
 # Same SEED + same END = exactly the same data on every run (CI depends on this).
-END = datetime(2026, 9, 1, tzinfo=timezone.utc)   # must be midnight UTC
+END = datetime(2026, 9, 1, tzinfo=UTC)   # must be midnight UTC
 DAYS = 14
 
 # One simulated step. Backfill and the live generator both move in steps of this
@@ -70,10 +70,10 @@ HOUSEHOLD_SHARES_CARD = 0.2
 NEW_IP_CHANCE = 0.15     # returning player logs in from another network (mobile, travel)
 
 USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15",
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
-    "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36",  # noqa: E501
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15",  # noqa: E501
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",  # noqa: E501
+    "Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Mobile Safari/537.36",  # noqa: E501
     "Mozilla/5.0 (X11; Linux x86_64; rv:129.0) Gecko/20100101 Firefox/129.0",
     "BetApp/4.12.0 (Android 13; Pixel 7)",
     "BetApp/4.12.0 (iOS 17.5; iPhone15,2)",

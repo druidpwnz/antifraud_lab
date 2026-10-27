@@ -31,5 +31,5 @@ def ready(request: Request) -> dict[str, str]:
         with request.app.state.pool.connection(timeout=2) as conn:
             conn.execute("SELECT 1")
     except Exception:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "database unavailable")
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "database unavailable") from None
     return {"status": "ready"}

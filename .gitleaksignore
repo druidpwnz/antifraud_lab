@@ -1,0 +1,5 @@
+# Findings gitleaks reports that are not secrets - each one checked by hand.
+# Format: commit:file:rule:line (the "Fingerprint" gitleaks prints).
+
+# An example Idempotency-Key in the API README - a made-up request id, not a key.
+e780e0f23bf87085abfda1bab6adb05dc47cccfc:api/README.md:generic-api-key:124

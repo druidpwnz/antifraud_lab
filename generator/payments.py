@@ -89,15 +89,14 @@ def create_withdrawals(conn, limit, active_players, balances):
         share = Decimal(str(round(random.uniform(*config.WITHDRAWAL_SHARE), 4)))
         amount = min(helpers.money(balance * share, minimum=config.MIN_WITHDRAWAL), balance)
 
-        transaction_id = conn.execute(
+        conn.execute(
             """
             INSERT INTO transactions
                 (player_id, method_id, direction, amount, currency, status, created_at)
             VALUES (%s, %s, 'withdrawal', %s, %s, 'pending', %s)
-            RETURNING id
             """,
             (player["id"], player["method_id"], amount, player["currency"], created_at),
-        ).fetchone()[0]
+        )
 
         balances[player["id"]] = balance - amount
 

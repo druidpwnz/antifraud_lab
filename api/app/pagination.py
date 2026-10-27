@@ -40,13 +40,11 @@ import base64
 import binascii
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Generic, Literal, TypeVar
+from typing import Literal
 
 from fastapi import HTTPException, Query, status
 from psycopg import sql
 from pydantic import BaseModel, Field
-
-T = TypeVar("T")
 
 Order = Literal["asc", "desc"]
 
@@ -58,7 +56,7 @@ SORTS: dict[str, tuple[str, ...]] = {
 }
 
 
-class Page(BaseModel, Generic[T]):
+class Page[T](BaseModel):
     items: list[T]
     next_cursor: str | None = Field(
         description="Pass as `cursor` to get the next page. null on the last page."
@@ -101,7 +99,7 @@ def decode(cursor: str) -> Cursor:
     except (ValueError, binascii.Error, UnicodeDecodeError):
         # 400, not 422: the parameter is well-formed as a string, but it is not a
         # cursor this API issued. The client sent something it should not have.
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid cursor.")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid cursor.") from None
     return Cursor(sort, made_for, values)
 
 
@@ -109,7 +107,7 @@ def _parse_values(sort: str, parts: list[str]) -> tuple:
     if len(parts) != len(SORTS[sort]):
         raise ValueError("wrong number of values")
     values = []
-    for column, part in zip(SORTS[sort], parts):
+    for column, part in zip(SORTS[sort], parts, strict=True):
         if column == "id":
             value = int(part)
             if value < 0:
@@ -148,7 +146,7 @@ class PageParams:
                 f"This cursor was made for order={self._cursor.order}; ask with the same order.",
             )
 
-    def sorted_by(self, sort: str) -> "PageParams":
+    def sorted_by(self, sort: str) -> PageParams:
         self.sort = sort
         return self
 

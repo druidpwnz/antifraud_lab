@@ -34,8 +34,9 @@ dumps/
 # --- Postman: local environments may contain API keys; the collection is committed ---
 *.postman_environment.local.json
 
-# --- Logs ---
+# --- Logs and saved output ---
 *.log
+*_result.txt
 logs/
 
 # --- Editors and OS ---
@@ -44,3 +45,5 @@ logs/
 *.swp
 .DS_Store
 Thumbs.db
+
+llm_memory/

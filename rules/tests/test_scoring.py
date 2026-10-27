@@ -11,7 +11,7 @@ SCORING = (Path(__file__).resolve().parents[2] / "db" / "scoring.sql").read_text
 def score(conn):
     cur = conn.execute(SCORING)
     names = [c.name for c in cur.description]
-    return {row[0]: dict(zip(names, row)) for row in cur.fetchall()}
+    return {row[0]: dict(zip(names, row, strict=True)) for row in cur.fetchall()}
 
 
 def plant(conn, entity_type, entity_id, pattern):

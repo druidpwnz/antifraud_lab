@@ -32,7 +32,7 @@ class ApiError(Exception):
         self.detail = detail
 
     @classmethod
-    def from_response(cls, response: httpx.Response) -> "ApiError":
+    def from_response(cls, response: httpx.Response) -> ApiError:
         # Our API always answers errors as problem+json. A proxy in front of it might
         # not, so fall back to the status line rather than crash on a non-JSON body.
         try:

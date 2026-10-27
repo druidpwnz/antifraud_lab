@@ -1,0 +1,3 @@
+# The linter - the same version here and in CI, so both find the same things.
+#     pip install -r requirements-lint.txt && ruff check
+ruff==0.17.0

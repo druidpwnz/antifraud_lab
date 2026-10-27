@@ -15,10 +15,10 @@ from flask import Flask
 from werkzeug.exceptions import HTTPException
 
 from app import config as config_module
-from app.api_client import ApiClient, ApiError, ApiUnavailable
-from app.htmx import render
 from app import formatting
+from app.api_client import ApiClient, ApiError, ApiUnavailable
 from app.auth import init_auth
+from app.htmx import render
 from app.views import bets, events, home, players
 
 log = logging.getLogger(__name__)

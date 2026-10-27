@@ -17,7 +17,7 @@ import random
 import signal
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import config
 import db
@@ -81,7 +81,7 @@ with db.connect() as conn:
 
     while running:
         tick_end = sim_time + helpers.TICK
-        wait = tick_end + helpers.SPILL - datetime.now(timezone.utc)
+        wait = tick_end + helpers.SPILL - datetime.now(UTC)
         if wait > timedelta(0):
             # The tick's sessions are not over in the real world yet. Generating it now would
             # write sessions, bets and settlements stamped in the future - and the
@@ -109,7 +109,7 @@ with db.connect() as conn:
         )
         conn.commit()
 
-        behind = datetime.now(timezone.utc) - sim_time
+        behind = datetime.now(UTC) - sim_time
         ids_now = metrics.newest_ids(conn)
         metrics.tick_written(ids, ids_now, time.monotonic() - started, sim_time,
                              catching_up=behind > helpers.TICK + helpers.SPILL)

@@ -5,13 +5,13 @@ changing one fact and watching one reason appear.
 """
 
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from app import scoring
 from app.scoring import Facts, Proposed
 
-NOW = datetime(2026, 8, 12, 10, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 12, 10, tzinfo=UTC)
 
 # A boring, established, well-funded player. Every test changes one thing about them.
 CALM = Facts(

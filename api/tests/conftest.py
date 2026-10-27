@@ -9,7 +9,7 @@ Override the connection with TEST_DATABASE_URL.
 """
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import psycopg
 import pytest
@@ -21,7 +21,7 @@ READ_KEY = "test-read-key"        # read only, like the admin panel's
 
 COUNTRIES = ["UA", "PL", "DE", "GB", "ES"]
 CURRENCY = {"UA": "UAH", "PL": "PLN", "DE": "EUR", "GB": "GBP", "ES": "EUR"}
-FIRST_REGISTRATION = datetime(2026, 8, 1, tzinfo=timezone.utc)
+FIRST_REGISTRATION = datetime(2026, 8, 1, tzinfo=UTC)
 PLAYER_COUNT = 25
 
 # Player 1 has a small, hand-checkable money history. Player 2 has nothing at all.
@@ -61,7 +61,7 @@ CARD_SHARERS = [6, 8]
 
 
 def at(day: int, hour: int = 10, minute: int = 0) -> datetime:
-    return datetime(2026, 8, day, hour, minute, tzinfo=timezone.utc)
+    return datetime(2026, 8, day, hour, minute, tzinfo=UTC)
 
 
 SIM_NOW = at(12, 10)

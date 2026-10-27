@@ -53,7 +53,7 @@ def set_sim_time(sim_time):
 def newest_ids(conn):
     """{table: its newest id} - one query, an index lookup per table."""
     selects = ", ".join(f"(SELECT coalesce(max(id), 0) FROM {t})" for t in TABLES)
-    return dict(zip(TABLES, conn.execute(f"SELECT {selects}").fetchone()))
+    return dict(zip(TABLES, conn.execute(f"SELECT {selects}").fetchone(), strict=True))
 
 
 def tick_written(before, after, seconds, sim_time, catching_up):

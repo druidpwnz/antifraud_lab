@@ -16,7 +16,7 @@ from app.routers import bets, events, health, players, risk_checks
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Runs once at startup (before `yield`) and once at shutdown (after it)."""
     app.state.settings = settings.load()
     app.state.pool = db.create_pool(app.state.settings)
