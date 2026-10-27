@@ -1,0 +1,166 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+    paths-ignore:
+      - '**/*.md'
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+  workflow_dispatch:
+
+# No repository secrets or write permissions are needed, including on fork PRs.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  checks:
+    name: Lint, secrets, admin
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # Gitleaks checks all history, not just the latest commit.
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14'
+          cache: pip
+          cache-dependency-path: |
+            requirements-lint.txt
+            admin/requirements*.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-lint.txt -r admin/requirements-dev.txt
+
+      - name: Lint
+        run: python -m ruff check --output-format=github .
+
+      - name: Install Gitleaks
+        # The CLI needs no license or GitHub token. Pin the archive as well as its version.
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl --fail --silent --show-error --location --retry 3 \
+            --output gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tar.gz' | sha256sum --check
+          mkdir -p gitleaks-bin
+          tar -xzf gitleaks.tar.gz -C gitleaks-bin gitleaks
+          echo "$RUNNER_TEMP/gitleaks-bin" >> "$GITHUB_PATH"
+
+      - name: Scan Git history for secrets
+        # Include HEAD explicitly: on PRs it is GitHub's synthetic merge commit.
+        # Redaction keeps any discovered secret out of the Actions log.
+        run: gitleaks git --redact --log-opts="--all HEAD" .
+
+      - name: Admin tests
+        working-directory: admin
+        run: python -m pytest -q
+
+  api:
+    name: API tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: antifraud
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: antifraud_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U antifraud -d antifraud_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      # This password is only for the disposable service container in this job.
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: antifraud
+      PGPASSWORD: ci-only-password
+      PGDATABASE: antifraud_test
+      # Empty DSNs make psycopg use PG* above, for both migration and test code.
+      DATABASE_URL: ''
+      TEST_DATABASE_URL: ''
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14'
+          cache: pip
+          cache-dependency-path: api/requirements*.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r api/requirements-dev.txt
+
+      - name: Apply all migrations to the test database
+        run: python db/migrate.py
+
+      - name: API tests
+        working-directory: api
+        run: python -m pytest -q
+
+  rules:
+    name: Detection rule tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Jobs run on separate machines: this database is not the API job's database.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: antifraud
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: antifraud_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U antifraud -d antifraud_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: antifraud
+      PGPASSWORD: ci-only-password
+      PGDATABASE: antifraud_test
+      DATABASE_URL: ''
+      TEST_DATABASE_URL: ''
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14'
+          cache: pip
+          cache-dependency-path: rules/requirements*.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r rules/requirements-dev.txt
+
+      - name: Apply all migrations to the test database
+        run: python db/migrate.py
+
+      - name: Detection rule tests
+        working-directory: rules
+        run: python -m pytest -q

@@ -82,11 +82,11 @@ is in the service READMEs: [`api/`](api/README.md), [`admin/`](admin/README.md),
 | 3 | Fraud injector | **3 patterns done** |
 | 4 | Live generator | **done** — metrics in phase 9 |
 | 5 | Thin alerting (fills `alerts`) | **done** — as the start of phase 9 |
-| 6 | API — FastAPI | **done** — 15 endpoints, 140 tests, Postman collection |
-| 7 | Admin panel — Flask + Jinja + HTMX, over the API | **done** — players, bets, events; 140 tests |
+| 6 | API — FastAPI | **done** — 15 endpoints, 148 tests, Postman collection |
+| 7 | Admin panel — Flask + Jinja + HTMX, over the API | **done** — players, bets, events; 141 tests |
 | 8 | Compose, for real | **done** — one `docker compose up -d`, six services (nine since phase 9) |
 | 9 | Detection rules, Prometheus, Grafana — fraud alerting | **done** — 3 rules, 4 dashboards, 9 alerts |
-| 10 | CI/CD — GitHub Actions | **next** — planned |
+| 10 | CI/CD — GitHub Actions | **in progress** — cleanup done; first CI workflow ready for its GitHub run |
 
 Done so far: 14-table schema with constraints that hold, a seeded reproducible
 backfill (90 days = 9.7k players, 650k bets, ~10 min), three planted fraud patterns
@@ -95,11 +95,11 @@ backfill, and `db/tests/invariants.sql` — twelve checks that must hold at any 
 size, which raise and exit non-zero when they do not.
 
 The API is in [`api/`](api/README.md): read access to players, money, bets and
-events, plus idempotent risk checks, with 140 tests and a Postman collection.
+events, plus idempotent risk checks, with 148 tests and a Postman collection.
 
 The admin panel is in [`admin/`](admin/README.md): a read-only back office over the
 API — players with their money, logins and linked accounts, every bet, every match —
-with a login, 140 tests and the API key kept out of the browser.
+with a login, 141 tests and the API key kept out of the browser.
 
 Detection is in [`rules/`](rules/README.md): three rules, one SQL file each, run
 every minute over the rows that arrived since the last run, and scored against the
@@ -1067,7 +1067,7 @@ Run on a fresh `git clone` of the step 8 commit, on a throwaway stack, on 2026-1
 
 ---
 
-## Phase 10 — CI/CD with GitHub Actions (next)
+## Phase 10 — CI/CD with GitHub Actions (in progress)
 
 **The goal:** every push is checked by GitHub — lint, a secret scan, every test
 suite, and the whole stack started with compose the way it runs at home. A green
@@ -1109,7 +1109,7 @@ secret, never anywhere near the home server.
 
 | Job | What it proves | How |
 |---|---|---|
-| checks | no obvious mistakes; no password or key anywhere in the history; the panel's 140 tests | `ruff check`; `gitleaks` over a full clone; pytest in `admin/` (the API is mocked, no database) — one job, they are quick |
+| checks | lint and secret scanning pass; the panel's 141 tests pass | `ruff check`; `gitleaks` over a full clone; pytest in `admin/` (the API is mocked, no database) — one job, they are quick |
 | api | 148 tests | pytest against a `postgres:18` service, migrated |
 | rules | 25 tests | pytest against a `postgres:18` service, migrated |
 | **stack** | it works together, the way it runs at home | below |
@@ -1127,6 +1127,42 @@ The stack job is the one that matters most:
    live code, not only the backfill
 6. Grafana has its 4 dashboards and 9 alert rules; every Prometheus target is `UP`
 7. On failure, every container's logs are printed. `down -v` at the end
+
+### First CI workflow — ready for the first GitHub run
+
+[`ci.yml`](.github/workflows/ci.yml) implements `checks`, `api` and `rules`;
+the stack job above is the next step. It runs on branch pushes and pull requests,
+skips changes consisting only of Markdown files, and can also be started manually
+from **Actions → CI → Run workflow**. A newer run cancels the previous run for the
+same event and ref. Each job has a 10-minute timeout.
+
+The database jobs each get a separate PostgreSQL 18 service container. Both apply
+all seven migrations to `antifraud_test` before running pytest. The generator is
+not needed: the tests create their own data. `DATABASE_URL` and
+`TEST_DATABASE_URL` are empty so both migration and test code use the job's `PG*`
+variables. The password in the workflow belongs only to that temporary database;
+no home-server credentials or repository secrets are used.
+
+Checkout and Python setup are pinned to commit SHAs. Gitleaks 8.30.1 is downloaded
+directly, checked against a pinned SHA-256, and scans all fetched history plus
+`HEAD`, with findings redacted. The reviewed fingerprint in `.gitleaksignore`
+still applies. Jobs have `contents: read` only; checkout does not leave its token
+in the Git configuration.
+
+Local verification on 2026-10-27: actionlint passed; Ruff passed; Gitleaks scanned
+42 commits with no findings. Admin 141, API 148 and rules 25 tests passed; the
+database suites used separate fresh databases on a temporary PostgreSQL 18
+cluster, which was stopped afterward. Negative checks confirmed that Ruff rejects
+an undefined name and Gitleaks rejects a fake token deleted in a later commit.
+The GitHub runner, dependency installation there, and service-container startup
+still need the first pushed run to verify them.
+
+Before that push, check GitHub's Actions billing settings against the $0 requirement
+above. After reviewing and committing the workflow and these docs, push and open
+**Actions → CI**. Expect three green jobs: **Lint, secrets, admin**, **API tests**,
+and **Detection rule tests**. CLI alternative: `gh run list --workflow ci.yml`,
+then `gh run watch RUN_ID --exit-status`; for a failure,
+`gh run view RUN_ID --log-failed`.
 
 ### Traps to plan for
 
@@ -1165,7 +1201,8 @@ deploy/antifraud-update.{service,timer}   systemd, every 5 minutes
       41 commits: one finding, an example `Idempotency-Key` UUID in the API README —
       allowed by its fingerprint in `.gitleaksignore`; no real secret, ever
 - [ ] 2. CI, first half: checks (lint, secrets, admin), api, rules — the first green
-      check on GitHub. Check first: no payment method on the GitHub account
+      check on GitHub. Workflow implemented and locally checked; the first GitHub
+      run is pending. Check first: no payment method on the GitHub account
 - [ ] 3. CI, the stack job: compose, invariants, Newman, the scoring gate, the live
       generator, Grafana and Prometheus
 - [ ] 4. Images: `build_info` metric and the version on the Ops dashboard; image
