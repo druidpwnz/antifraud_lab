@@ -68,6 +68,9 @@ jobs:
         working-directory: admin
         run: python -m pytest -q
 
+      - name: Monitoring check tests
+        run: python -m pytest -q ci/tests
+
   api:
     name: API tests
     runs-on: ubuntu-24.04
@@ -164,3 +167,85 @@ jobs:
       - name: Detection rule tests
         working-directory: rules
         run: python -m pytest -q
+
+  stack:
+    name: Full stack
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      # Separate from the home lab's fixed Compose name. Volumes are disposable.
+      COMPOSE_PROJECT_NAME: antifraud-ci
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14'
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Install Newman
+        run: npm install --prefix "$RUNNER_TEMP/newman" --no-audit --no-fund newman@6.2.3
+
+      - name: Start the stack and seed deterministic data
+        run: |
+          cp .env.example .env
+          docker compose up -d --build --wait --wait-timeout 180 admin rules prometheus grafana
+          # Dependencies above have applied migrations. Run seed in the foreground
+          # and wait for its exit code; the live generator must not start yet.
+          docker compose run --rm --no-deps seed
+
+      - name: Seed invariants
+        run: docker compose exec -T postgres psql -U antifraud -d antifraud -v ON_ERROR_STOP=1 -f - < db/tests/invariants.sql
+
+      - name: Postman collection against the real API
+        run: |
+          "$RUNNER_TEMP/newman/node_modules/.bin/newman" run api/postman/antifraud.postman_collection.json \
+            --environment api/postman/local.postman_environment.json \
+            --env-var baseUrl=http://127.0.0.1:8000 \
+            --env-var apiKey=demo-full-key-change-me \
+            --env-var readApiKey=demo-read-key-change-me \
+            --timeout-request 10000 --timeout 120000 --bail
+
+      - name: Detection scoring gate
+        run: |
+          docker compose exec -T rules python -c 'import runner; runner.run_all()'
+          docker compose exec -T postgres psql -U antifraud -d antifraud -v ON_ERROR_STOP=1 -f - < db/scoring.sql
+          docker compose exec -T postgres psql -U antifraud -d antifraud -v ON_ERROR_STOP=1 -f - < db/tests/scoring_gate.sql
+
+      - name: Live generator and monitoring
+        env:
+          GRAFANA_ADMIN_PASSWORD: demo-grafana-admin-password-change-me
+        run: |
+          before=$(docker compose exec -T postgres psql -U antifraud -d antifraud -At -v ON_ERROR_STOP=1 \
+            -c 'SELECT extract(epoch FROM sim_time)::bigint FROM sim_state WHERE id = 1')
+          docker compose up -d --no-deps generator
+          sleep 60
+          # Check while the generator is alive: stopping it first makes its target DOWN.
+          python ci/check_monitoring.py
+          docker compose stop -t 30 generator
+          container=$(docker compose ps -aq generator)
+          test "$(docker inspect --format '{{.State.ExitCode}}' "$container")" = 0
+          after=$(docker compose exec -T postgres psql -U antifraud -d antifraud -At -v ON_ERROR_STOP=1 \
+            -c 'SELECT extract(epoch FROM sim_time)::bigint FROM sim_state WHERE id = 1')
+          test "$after" -gt "$before"
+          echo "PASS live generator: sim_time advanced from $before to $after and exited cleanly"
+
+      - name: Invariants after live catch-up
+        run: docker compose exec -T postgres psql -U antifraud -d antifraud -v ON_ERROR_STOP=1 -f - < db/tests/invariants.sql
+
+      - name: Container status and logs on failure
+        if: failure()
+        run: |
+          docker compose --env-file .env.example ps -a
+          docker compose --env-file .env.example logs --no-color
+
+      - name: Remove the CI stack and its volumes
+        if: always()
+        # Only the disposable project above; never use this on the home server.
+        run: docker compose --env-file .env.example down --volumes --remove-orphans

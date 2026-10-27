@@ -86,7 +86,7 @@ is in the service READMEs: [`api/`](api/README.md), [`admin/`](admin/README.md),
 | 7 | Admin panel — Flask + Jinja + HTMX, over the API | **done** — players, bets, events; 141 tests |
 | 8 | Compose, for real | **done** — one `docker compose up -d`, six services (nine since phase 9) |
 | 9 | Detection rules, Prometheus, Grafana — fraud alerting | **done** — 3 rules, 4 dashboards, 9 alerts |
-| 10 | CI/CD — GitHub Actions | **in progress** — cleanup done; first CI workflow ready for its GitHub run |
+| 10 | CI/CD — GitHub Actions | **in progress** — first three CI jobs green; full-stack job added |
 
 Done so far: 14-table schema with constraints that hold, a seeded reproducible
 backfill (90 days = 9.7k players, 650k bets, ~10 min), three planted fraud patterns
@@ -1109,32 +1109,40 @@ secret, never anywhere near the home server.
 
 | Job | What it proves | How |
 |---|---|---|
-| checks | lint and secret scanning pass; the panel's 141 tests pass | `ruff check`; `gitleaks` over a full clone; pytest in `admin/` (the API is mocked, no database) — one job, they are quick |
+| checks | lint and secret scanning pass; 141 admin tests and 7 monitoring-check tests pass | `ruff check`; `gitleaks` over a full clone; pytest in `admin/` and `ci/tests/` — no database needed |
 | api | 148 tests | pytest against a `postgres:18` service, migrated |
-| rules | 25 tests | pytest against a `postgres:18` service, migrated |
+| rules | 36 tests, including 11 scoring-gate checks | pytest against a `postgres:18` service, migrated |
 | **stack** | it works together, the way it runs at home | below |
 
 The stack job is the one that matters most:
 
-1. `cp .env.example .env`, `docker compose up -d --build --wait` — everything but the
-   live generator. The seed is deterministic, so the Postman ids match
+1. Copy `.env.example`, build and start the API, panel, rules and monitoring with
+   `docker compose up --wait` (dependencies start Postgres and apply migrations).
+   Run `seed` separately in the foreground and require a successful exit. The live
+   generator stays off, so the seed is deterministic and the Postman ids match
 2. `invariants.sql` — 12 checks
 3. **Newman**: the Postman collection against the API — 36 requests, 60 assertions
 4. **The scoring gate**: one rules run, then `db/tests/scoring_gate.sql` raises if
    `LATE_BET` or `SETTLEMENT_MISMATCH` recall drops below 1.0, or `STAKE_ANOMALY`
    below 0.85 — a rule that stops catching fraud fails the build
-5. The live generator for 60 seconds of catch-up, then `invariants.sql` again — the
-   live code, not only the backfill
-6. Grafana has its 4 dashboards and 9 alert rules; every Prometheus target is `UP`
-7. On failure, every container's logs are printed. `down -v` at the end
+5. The live generator for 60 seconds of catch-up. While it is still running,
+   `ci/check_monitoring.py` checks the exact four dashboard UIDs, nine alert-rule
+   UIDs, and all four Prometheus targets `UP`. It retries for up to another minute
+   to allow for provisioning and scrapes
+6. Stop the generator gracefully, require exit code 0 and an advanced `sim_time`,
+   then run `invariants.sql` again — this checks the live code and its shutdown
+7. On failure, every container's logs are printed. Always remove the disposable
+   `antifraud-ci` project and its volumes at the end
 
-### First CI workflow — ready for the first GitHub run
+### CI workflow
 
-[`ci.yml`](.github/workflows/ci.yml) implements `checks`, `api` and `rules`;
-the stack job above is the next step. It runs on branch pushes and pull requests,
+[`ci.yml`](.github/workflows/ci.yml) implements `checks`, `api`, `rules` and `stack`.
+The first three jobs passed on GitHub at commit `55ec110`, confirmed by the user.
+The new stack job still needs its first GitHub run. The workflow runs on branch pushes and pull requests,
 skips changes consisting only of Markdown files, and can also be started manually
 from **Actions → CI → Run workflow**. A newer run cancels the previous run for the
-same event and ref. Each job has a 10-minute timeout.
+same event and ref. The first three jobs have a 10-minute timeout; the stack job
+has 20 minutes for image builds and the integration checks.
 
 The database jobs each get a separate PostgreSQL 18 service container. Both apply
 all seven migrations to `antifraud_test` before running pytest. The generator is
@@ -1154,15 +1162,37 @@ Local verification on 2026-10-27: actionlint passed; Ruff passed; Gitleaks scann
 database suites used separate fresh databases on a temporary PostgreSQL 18
 cluster, which was stopped afterward. Negative checks confirmed that Ruff rejects
 an undefined name and Gitleaks rejects a fake token deleted in a later commit.
-The GitHub runner, dependency installation there, and service-container startup
-still need the first pushed run to verify them.
+The first green GitHub run subsequently verified dependency installation and
+service-container startup for those three jobs.
 
-Before that push, check GitHub's Actions billing settings against the $0 requirement
-above. After reviewing and committing the workflow and these docs, push and open
-**Actions → CI**. Expect three green jobs: **Lint, secrets, admin**, **API tests**,
-and **Detection rule tests**. CLI alternative: `gh run list --workflow ci.yml`,
+Keep GitHub's Actions billing settings within the $0 requirement above. After
+reviewing and committing a change, push and open **Actions → CI**. Expect four
+green jobs: **Lint, secrets, admin**, **API tests**, **Detection rule tests**, and
+**Full stack**. CLI alternative: `gh run list --workflow ci.yml`,
 then `gh run watch RUN_ID --exit-status`; for a failure,
 `gh run view RUN_ID --log-failed`.
+
+The scoring gate reads the same `rule_scores` view as Grafana, but compares the
+exact caught/planted counts, not the rounded dashboard recall. It also rejects
+missing scores, empty ground truth, missing rule state and unfinished scans;
+otherwise a rule that never ran could appear to pass. Its 11 regression tests
+cover each floor, values rounded up to a floor, and these missing-data cases.
+The monitoring check has seven tests, including a missing generator target and a
+DOWN target, so an empty or incomplete target list cannot pass.
+
+Stack verification on 2026-10-27 used a separate temporary Compose project, copied
+source files, separate image tags and volumes, and alternate localhost ports:
+36 Newman requests / 60 assertions passed; invariants were 12/12 before and after
+live catch-up; recall was 37/37 for `LATE_BET`, 78/78 for `SETTLEMENT_MISMATCH`,
+and 49/51 for `STAKE_ANOMALY`. All four dashboards, nine alert rules and four UP
+targets were found. The generator advanced `sim_time` and exited 0 on SIGTERM.
+The temporary stack and volumes were removed afterward. Separately, all 36 rules
+tests and seven monitoring-check tests passed; Ruff and actionlint passed too.
+
+Newman is pinned to 6.2.3 and runs the existing v2.1 collection locally against the
+CI API, with the public demo keys. It does not require a Postman account or token.
+The stack job is for GitHub's disposable runner; do not copy its `.env` replacement
+or volume-removal commands into the home-server checkout.
 
 ### Traps to plan for
 
@@ -1184,6 +1214,8 @@ then `gh run watch RUN_ID --exit-status`; for a failure,
 .github/workflows/images.yml    build and push - after CI is green on main
 ruff.toml
 db/tests/scoring_gate.sql       recall floors per rule; raises below them
+ci/check_monitoring.py          provisioned dashboards, alerts and live scrape targets
+ci/tests/test_monitoring.py     missing/down monitoring must fail the check
 deploy/update.sh                on the server: newer :main? check out, pull, up -d
 deploy/antifraud-update.{service,timer}   systemd, every 5 minutes
 ```
@@ -1200,11 +1232,11 @@ deploy/antifraud-update.{service,timer}   systemd, every 5 minutes
       backfill is byte-for-byte the same as before them. `gitleaks` v8.30.1 over all
       41 commits: one finding, an example `Idempotency-Key` UUID in the API README —
       allowed by its fingerprint in `.gitleaksignore`; no real secret, ever
-- [ ] 2. CI, first half: checks (lint, secrets, admin), api, rules — the first green
-      check on GitHub. Workflow implemented and locally checked; the first GitHub
-      run is pending. Check first: no payment method on the GitHub account
+- [x] 2. CI, first half: checks (lint, secrets, admin), api, rules — first green
+      GitHub run at `55ec110`, confirmed by the user
 - [ ] 3. CI, the stack job: compose, invariants, Newman, the scoring gate, the live
-      generator, Grafana and Prometheus
+      generator, Grafana and Prometheus — implemented and passed on an isolated
+      local stack; first GitHub run pending
 - [ ] 4. Images: `build_info` metric and the version on the Ops dashboard; image
       names in compose; build and push on green `main`; packages made public
 - [ ] 5. Deploy: `deploy/update.sh` and the systemd timer, installed on the home
