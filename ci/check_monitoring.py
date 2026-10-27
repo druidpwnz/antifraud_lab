@@ -13,7 +13,8 @@ ALERTS = {
     "high-severity-detection", "big-payout-mismatch", "shared-device", "service-down",
     "rules-runner-stale", "generator-behind", "api-errors", "api-slow", "detection-rate-shift",
 }
-TARGETS = {"generator", "api", "rules", "prometheus"}
+SERVICES = {"generator", "api", "rules", "admin"}
+TARGETS = SERVICES | {"prometheus"}
 
 
 def get_json(url, authorization=None):
@@ -22,7 +23,7 @@ def get_json(url, authorization=None):
         return json.load(response)
 
 
-def check(grafana, prometheus, authorization):
+def check(grafana, prometheus, authorization, version="local"):
     dashboards = get_json(f"{grafana}/api/search?type=dash-db", authorization)
     found = {item["uid"] for item in dashboards}
     if found != DASHBOARDS:
@@ -39,11 +40,21 @@ def check(grafana, prometheus, authorization):
     targets = response["data"]["activeTargets"]
     found = {item["labels"]["job"] for item in targets}
     if found != TARGETS or len(targets) != len(TARGETS):
-        raise ValueError(f"expected exactly four scrape targets, got {targets}")
+        raise ValueError(f"expected exactly {len(TARGETS)} scrape targets, got {targets}")
     unhealthy = [f"{item['labels']['job']}: {item['health']} {item.get('lastError', '')}"
                  for item in targets if item["health"] != "up"]
     if unhealthy:
         raise ValueError(f"targets not UP: {unhealthy}")
+
+    response = get_json(f"{prometheus}/api/v1/query?query=antifraud_build_info")
+    if response["status"] != "success":
+        raise ValueError(f"Prometheus version query failed: {response}")
+    builds = response["data"]["result"]
+    found = {item["metric"]["job"] for item in builds}
+    if found != SERVICES or len(builds) != len(SERVICES):
+        raise ValueError(f"missing or duplicate service build versions: {builds}")
+    if any(item["metric"].get("version") != version or float(item["value"][1]) != 1 for item in builds):
+        raise ValueError(f"expected build version {version} on every service, got {builds}")
 
 
 def main():
@@ -57,8 +68,9 @@ def main():
     deadline = time.monotonic() + args.timeout
     while True:
         try:
-            check(args.grafana.rstrip("/"), args.prometheus.rstrip("/"), authorization)
-            print("PASS monitoring: 4 dashboards, 9 alert rules, all 4 Prometheus targets UP")
+            version = os.environ.get("BUILD_VERSION", "local")
+            check(args.grafana.rstrip("/"), args.prometheus.rstrip("/"), authorization, version)
+            print(f"PASS monitoring: 4 dashboards, 9 alert rules, 5 targets UP; all services at {version}")
             return
         except (URLError, TimeoutError, ValueError, KeyError, TypeError) as exc:
             if time.monotonic() >= deadline:

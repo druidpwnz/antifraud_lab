@@ -3,4 +3,6 @@
 *
 !requirements.txt
 !app/
+!metrics.py
+!gunicorn.conf.py
 **/__pycache__

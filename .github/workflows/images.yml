@@ -1,0 +1,86 @@
+name: Images
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Never interrupt a publisher halfway through updating the four :main tags.
+concurrency:
+  group: images-main
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  publish:
+    if: >-
+      github.repository == 'druidpwnz/antifraud_lab' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      actions: write # Download this run's artifact, then delete it after publishing.
+    env:
+      BUILD_VERSION: ${{ github.event.workflow_run.head_sha }}
+      IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
+      CI_RUN_ID: ${{ github.event.workflow_run.id }}
+      ARTIFACT_NAME: tested-images-${{ github.event.workflow_run.head_sha }}-${{ github.event.workflow_run.run_attempt }}
+    steps:
+      # workflow_run has write permissions: never check out a PR or execute its artifacts.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14'
+
+      - name: Download images from the successful CI run
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/tested-images
+          digest-mismatch: error
+
+      - name: Load and verify the tested images
+        run: |
+          docker load --input "$RUNNER_TEMP/tested-images/tested-images.tar.gz"
+          python ci/check_images.py
+
+      - name: Log in to GHCR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
+      - name: Publish commit tags and promote the current main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash ci/publish_images.sh
+
+      - name: Remove the transferred artifact to limit storage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          artifact=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/artifacts" \
+            --paginate | jq -r --arg name "$ARTIFACT_NAME" '.artifacts[] | select(.name == $name) | .id')
+          test -n "$artifact"
+          gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact"
+
+      - name: Log out of GHCR
+        if: always()
+        run: docker logout ghcr.io

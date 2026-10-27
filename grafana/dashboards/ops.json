@@ -8,7 +8,7 @@
   "editable": false,
   "graphTooltip": 1,
   "schemaVersion": 41,
-  "version": 1,
+  "version": 2,
   "timezone": "utc",
   "time": {
     "from": "now-3h",
@@ -326,13 +326,77 @@
       }
     },
     {
+      "id": 12,
+      "type": "table",
+      "title": "Running build versions",
+      "description": "Source revision baked into each service image. local means a development build. All four services should show the same commit after deployment.",
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 24,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "antifraud_build_info",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "editorMode": "code",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "Value": true
+            },
+            "indexByName": {
+              "job": 0,
+              "version": 1
+            },
+            "renameByName": {
+              "job": "Service",
+              "version": "Commit"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "displayName": "Service",
+            "desc": false
+          }
+        ]
+      }
+    },
+    {
       "id": 5,
       "type": "timeseries",
       "title": "API requests per second, by route",
       "description": "Labelled by route template - /v1/players/{player_id}, never one series per player.",
       "gridPos": {
         "x": 0,
-        "y": 4,
+        "y": 9,
         "w": 12,
         "h": 8
       },
@@ -390,7 +454,7 @@
       "description": "99 requests in 100 on that route were faster than this.",
       "gridPos": {
         "x": 12,
-        "y": 4,
+        "y": 9,
         "w": 12,
         "h": 8
       },
@@ -448,7 +512,7 @@
       "description": "High while catching up, then a steady trickle every 5 minutes.",
       "gridPos": {
         "x": 0,
-        "y": 12,
+        "y": 17,
         "w": 12,
         "h": 8
       },
@@ -612,7 +676,7 @@
       "description": "Normal is a 5-10 minute sawtooth. The dashed line is the 20-minute alert level.",
       "gridPos": {
         "x": 12,
-        "y": 12,
+        "y": 17,
         "w": 12,
         "h": 8
       },
@@ -685,7 +749,7 @@
       "description": "New source rows each rule looked at, averaged over 5 minutes (the runner works once a minute). SETTLEMENT_MISMATCH reads settlements; LATE_BET and STAKE_ANOMALY both read bets, so their lines lie on top of each other.",
       "gridPos": {
         "x": 0,
-        "y": 20,
+        "y": 25,
         "w": 8,
         "h": 8
       },
@@ -789,7 +853,7 @@
       "description": "Time for one run of all rules.",
       "gridPos": {
         "x": 8,
-        "y": 20,
+        "y": 25,
         "w": 8,
         "h": 8
       },
@@ -846,7 +910,7 @@
       "description": "Time to generate and commit one 5-minute tick.",
       "gridPos": {
         "x": 16,
-        "y": 20,
+        "y": 25,
         "w": 8,
         "h": 8
       },

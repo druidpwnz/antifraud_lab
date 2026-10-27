@@ -86,7 +86,7 @@ is in the service READMEs: [`api/`](api/README.md), [`admin/`](admin/README.md),
 | 7 | Admin panel — Flask + Jinja + HTMX, over the API | **done** — players, bets, events; 141 tests |
 | 8 | Compose, for real | **done** — one `docker compose up -d`, six services (nine since phase 9) |
 | 9 | Detection rules, Prometheus, Grafana — fraud alerting | **done** — 3 rules, 4 dashboards, 9 alerts |
-| 10 | CI/CD — GitHub Actions | **in progress** — first three CI jobs green; full-stack job added |
+| 10 | CI/CD — GitHub Actions | **in progress** — full-stack CI green; image publishing and build versions added |
 
 Done so far: 14-table schema with constraints that hold, a seeded reproducible
 backfill (90 days = 9.7k players, 650k bets, ~10 min), three planted fraud patterns
@@ -1075,11 +1075,13 @@ suite, and the whole stack started with compose the way it runs at home. A green
 itself within minutes. A red one never leaves GitHub.
 
 ```
- push ──> CI (GitHub's runners, thrown away after each job)
-           checks (lint, secrets, admin) · api · rules · stack (compose, end to end)
-             │ all green, on main only
-             v
-          images ──> ghcr.io/druidpwnz/antifraud-{generator,api,admin,rules}:<sha>, :main
+ push ──> CI: checks · api · rules ──> stack (build images, test together)
+                                      │ all green, push to main only
+                                      v
+                         short-lived artifact: the tested images
+                                      │
+                                      v
+          Images ──> ghcr.io/druidpwnz/antifraud-{generator,api,admin,rules}:<sha>, :main
                         ^
  home server ── every 5 min: "is :main newer?" ── pull, check out that commit, up -d
 ```
@@ -1095,11 +1097,13 @@ secret, never anywhere near the home server.
 | Deploy | **Pull, not push.** A systemd timer on the server checks `ghcr.io` every 5 minutes; when `:main` is newer, it checks out that commit, pulls its images and runs `docker compose up -d` | Nothing on the server listens and nothing from GitHub runs there. A self-hosted runner on a public repo would run strangers' pull requests on the home server — Docker access is root, `.env` and the LAN are right there. GitHub advises self-hosted runners for private repos only |
 | What the server runs | The commit an image was built from (`org.opencontainers.image.revision`), not whatever `main` is in git | The compose file, Grafana's files and the images always come from the same commit — one that passed CI. Images take minutes to build; `git pull` alone would run new config with old images in between |
 | Images | Public on `ghcr.io`, one per service we build, tagged with the full commit SHA and `main`. `linux/amd64` (the home server is x86_64) | The image that passed the tests is the image that runs. Public: no token on the server, and the code inside is the code the repo will publish. No passwords in any image — they stay in `.env` |
-| Compose | `image: ghcr.io/druidpwnz/antifraud-api:${IMAGE_TAG:-local}` next to the existing `build:` | Locally nothing changes: `up --build` builds `:local`. The server sets `IMAGE_TAG` and never builds |
+| Compose | `image: ghcr.io/druidpwnz/antifraud-api:${IMAGE_TAG:-local}` next to `build:`, with `pull_policy: never` | `up --build` builds locally without trying to pull an unpublished `:local`. Deployment will set `IMAGE_TAG`, explicitly `pull --policy always`, then start with `--no-build` |
 | Which version runs | Each service exports `antifraud_build_info{version="<sha>"}`; the *Ops* dashboard shows it | No runner means no deploy in the Actions tab — the lab says itself what it runs |
 | Runners | GitHub-hosted `ubuntu-24.04`, Python 3.14, `postgres:18` service containers | The same Postgres as compose. Throwaway machines are what makes running pull requests safe |
 | Permissions | `contents: read` for every job; `packages: write` only for the image job; never `pull_request_target`; image and deploy only on a push to `main` of this repo, not a fork | Least privilege, written down per job. `pull_request_target` runs a fork's code with this repo's secrets — the classic way public repos get burgled |
 | Actions | Pinned to a full commit SHA, the version in a comment | A tag can be moved to other code; a SHA cannot |
+| Tested images | The stack job saves its four images as one compressed artifact; Images loads them instead of rebuilding. One-day retention, deleted after a successful publish | Rebuilding after CI could resolve newer dependencies or a newer base image. Transferring the tested images preserves their image IDs; short retention limits Actions storage |
+| Artifact permissions | `actions: write` only in the publishing job, alongside `packages: write` | Needed to download the CI artifact and delete it after publication; the CI jobs remain read-only |
 | Lint | `ruff check`, version pinned, config in `ruff.toml` at the root, over generator, api, admin, rules. No reformatting | Finds real mistakes (unused imports, undefined names, bare `except`); a mass reformat would bury every later diff |
 | Secret scan | `gitleaks` over the **whole history**, every push | Once public, every old commit is public too. It has to be clean before, not only from now on |
 | Git flow | Straight to `main` while private: CI on every push, images only when it is green. Once public: branch protection, changes through pull requests | On a free private repo a red check cannot block anything; on a public one it can |
@@ -1109,7 +1113,7 @@ secret, never anywhere near the home server.
 
 | Job | What it proves | How |
 |---|---|---|
-| checks | lint and secret scanning pass; 141 admin tests and 7 monitoring-check tests pass | `ruff check`; `gitleaks` over a full clone; pytest in `admin/` and `ci/tests/` — no database needed |
+| checks | lint and secret scanning pass; 141 admin tests and 21 CI-helper tests pass | `ruff check`; `gitleaks` over a full clone; pytest in `admin/` and `ci/tests/` — no database needed |
 | api | 148 tests | pytest against a `postgres:18` service, migrated |
 | rules | 36 tests, including 11 scoring-gate checks | pytest against a `postgres:18` service, migrated |
 | **stack** | it works together, the way it runs at home | below |
@@ -1127,8 +1131,9 @@ The stack job is the one that matters most:
    below 0.85 — a rule that stops catching fraud fails the build
 5. The live generator for 60 seconds of catch-up. While it is still running,
    `ci/check_monitoring.py` checks the exact four dashboard UIDs, nine alert-rule
-   UIDs, and all four Prometheus targets `UP`. It retries for up to another minute
-   to allow for provisioning and scrapes
+   UIDs, and all five Prometheus targets `UP`. It also requires all four services
+   to expose the expected `antifraud_build_info` commit. It retries for up to another
+   minute to allow for provisioning and scrapes
 6. Stop the generator gracefully, require exit code 0 and an advanced `sim_time`,
    then run `invariants.sql` again — this checks the live code and its shutdown
 7. On failure, every container's logs are printed. Always remove the disposable
@@ -1137,11 +1142,12 @@ The stack job is the one that matters most:
 ### CI workflow
 
 [`ci.yml`](.github/workflows/ci.yml) implements `checks`, `api`, `rules` and `stack`.
-The first three jobs passed on GitHub at commit `55ec110`, confirmed by the user.
-The new stack job still needs its first GitHub run. The workflow runs on branch pushes and pull requests,
+The first three jobs passed on GitHub at `55ec110`; the stack job passed at
+`23da8ad`, confirmed by the user. The workflow runs on branch pushes and pull requests,
 skips changes consisting only of Markdown files, and can also be started manually
 from **Actions → CI → Run workflow**. A newer run cancels the previous run for the
-same event and ref. The first three jobs have a 10-minute timeout; the stack job
+same event and ref. The first three jobs run in parallel; the stack job waits for
+them to pass so a failed fast check avoids an expensive build. The first three jobs have a 10-minute timeout; the stack job
 has 20 minutes for image builds and the integration checks.
 
 The database jobs each get a separate PostgreSQL 18 service container. Both apply
@@ -1177,8 +1183,10 @@ exact caught/planted counts, not the rounded dashboard recall. It also rejects
 missing scores, empty ground truth, missing rule state and unfinished scans;
 otherwise a rule that never ran could appear to pass. Its 11 regression tests
 cover each floor, values rounded up to a floor, and these missing-data cases.
-The monitoring check has seven tests, including a missing generator target and a
-DOWN target, so an empty or incomplete target list cannot pass.
+The monitoring check has ten tests, including missing/down targets and mismatched
+build versions. Five image-metadata tests reject the wrong platform, revision,
+source or runtime version; six publishing tests use fake Docker/GitHub commands
+to check upload ordering, failures and stale runs without touching a registry.
 
 Stack verification on 2026-10-27 used a separate temporary Compose project, copied
 source files, separate image tags and volumes, and alternate localhost ports:
@@ -1193,6 +1201,62 @@ Newman is pinned to 6.2.3 and runs the existing v2.1 collection locally against 
 CI API, with the public demo keys. It does not require a Postman account or token.
 The stack job is for GitHub's disposable runner; do not copy its `.env` replacement
 or volume-removal commands into the home-server checkout.
+
+### Image publishing — ready for its first GitHub run
+
+[`images.yml`](.github/workflows/images.yml) runs after CI completes. Its job requires
+a successful **push to this repository's `main`**, not a PR, a fork, or a manual CI
+run. It checks out the exact tested SHA and downloads only that CI run's artifact.
+The archive's digest is checked by the download action. After loading, each image
+must be `linux/amd64`, have the expected source/revision OCI labels, and carry the
+same `BUILD_VERSION` in its environment.
+
+The job logs in with its temporary `GITHUB_TOKEN`; no registry password or PAT is
+configured. It pushes all four full-SHA tags before changing any `:main` tags. It
+only promotes `:main` if that commit is still the repository's current main tip.
+Publishers are serialized, and the generator's `:main` is updated last; the next
+phase's updater will read that revision and pull every service by the same SHA.
+The image job does not deploy anything to the home server.
+
+All Dockerfiles default to `BUILD_VERSION=local`. CI sets the build argument and
+`IMAGE_TAG` to its SHA. The runtime `antifraud_build_info{version="..."}` metric
+comes from the baked value. API, rules and generator expose it on their existing
+metrics listeners; the admin uses a Gunicorn master hook with its own registry and
+internal listener, so its two workers do not compete for the port. Ops shows the
+four versions in a **Running build versions** table.
+
+The image archive is uploaded only for main pushes, retained for at most one day,
+and deleted after successful publishing to limit storage. If a failed Images run
+has outlived its artifact, rerun the original push's CI run to create a new one.
+Keep the existing $0 Actions spending limit; artifact storage is also metered.
+
+Local verification on 2026-10-27: the isolated full stack passed again, including
+all five scrape targets and the same injected test version on all four services.
+All image platform/label/environment checks passed. The compressed archive was
+about 76 MiB; saving and loading it preserved all four image IDs. Admin 141,
+API 148, rules 36 and CI helpers 21 tests passed, as did Ruff and actionlint.
+The temporary stack, volumes and image tags were removed; the existing lab kept
+running. Actual artifact transfer on GitHub, GHCR publishing and anonymous pulls
+still need the first pushed run and the package visibility change below.
+
+After the first successful Images run, make each new package public once:
+**GitHub profile → Packages → antifraud-{api,admin,rules,generator} → Package
+settings → Change visibility → Public**. Packages start private; linking them to
+the repository does not make them public. See
+[GitHub's package visibility instructions](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility).
+Public packages let the home server pull without a token. Verify anonymous access
+with a temporary empty Docker config (replace `COMMIT_SHA` with the published SHA):
+
+```bash
+image_check_config=$(mktemp -d)
+for service in api admin rules generator; do
+  docker --config "$image_check_config" manifest inspect \
+    "ghcr.io/druidpwnz/antifraud-$service:COMMIT_SHA" >/dev/null || break
+done
+```
+
+Each command must succeed; any authentication error means that package is not yet
+public. No images are downloaded and no running containers are changed by this check.
 
 ### Traps to plan for
 
@@ -1211,11 +1275,13 @@ or volume-removal commands into the home-server checkout.
 
 ```
 .github/workflows/ci.yml        lint, secrets, unit tests, stack - every push and PR
-.github/workflows/images.yml    build and push - after CI is green on main
+.github/workflows/images.yml    publish the tested images - after CI is green on main
 ruff.toml
 db/tests/scoring_gate.sql       recall floors per rule; raises below them
 ci/check_monitoring.py          provisioned dashboards, alerts and live scrape targets
 ci/tests/test_monitoring.py     missing/down monitoring must fail the check
+ci/check_images.py              image platform, OCI labels and runtime version
+ci/publish_images.sh            push commit tags, then promote current main
 deploy/update.sh                on the server: newer :main? check out, pull, up -d
 deploy/antifraud-update.{service,timer}   systemd, every 5 minutes
 ```
@@ -1234,11 +1300,11 @@ deploy/antifraud-update.{service,timer}   systemd, every 5 minutes
       allowed by its fingerprint in `.gitleaksignore`; no real secret, ever
 - [x] 2. CI, first half: checks (lint, secrets, admin), api, rules — first green
       GitHub run at `55ec110`, confirmed by the user
-- [ ] 3. CI, the stack job: compose, invariants, Newman, the scoring gate, the live
-      generator, Grafana and Prometheus — implemented and passed on an isolated
-      local stack; first GitHub run pending
+- [x] 3. CI, the stack job: compose, invariants, Newman, the scoring gate, the live
+      generator, Grafana and Prometheus — green at `23da8ad`, confirmed by the user
 - [ ] 4. Images: `build_info` metric and the version on the Ops dashboard; image
-      names in compose; build and push on green `main`; packages made public
+      names in compose; publish tested images on green `main` — implemented;
+      first Images run and making its packages public are pending
 - [ ] 5. Deploy: `deploy/update.sh` and the systemd timer, installed on the home
       server; a change pushed from the laptop shows up on the server by itself
 - [ ] 6. Docs: this section, the quick start, and a *Going public* checklist —

@@ -18,6 +18,11 @@ RUN pip install -r requirements.txt
 COPY runner.py .
 COPY sql/ ./sql/
 
+ARG BUILD_VERSION=local
+ENV BUILD_VERSION=${BUILD_VERSION}
+LABEL org.opencontainers.image.revision=${BUILD_VERSION} \
+    org.opencontainers.image.source="https://github.com/druidpwnz/antifraud_lab"
+
 USER app
 
 # Exec form: python is PID 1 and gets SIGTERM itself, and stops within a second.

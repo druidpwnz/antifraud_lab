@@ -16,6 +16,12 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 COPY app/ ./app/
+COPY metrics.py gunicorn.conf.py ./
+
+ARG BUILD_VERSION=local
+ENV BUILD_VERSION=${BUILD_VERSION}
+LABEL org.opencontainers.image.revision=${BUILD_VERSION} \
+    org.opencontainers.image.source="https://github.com/druidpwnz/antifraud_lab"
 
 USER app
 EXPOSE 5000
@@ -25,4 +31,4 @@ EXPOSE 5000
 # also why SECRET_KEY must be set - each worker signs and checks the session cookie,
 # and with a random key per worker, every other request would look logged out.
 # "app:create_app()" - the module, and the factory gunicorn calls to get the app.
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--access-logfile", "-", "app:create_app()"]
+CMD ["gunicorn", "--config", "gunicorn.conf.py", "--bind", "0.0.0.0:5000", "--workers", "2", "--access-logfile", "-", "app:create_app()"]

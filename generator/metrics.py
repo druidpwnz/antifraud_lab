@@ -6,13 +6,16 @@
 # Labels: `table` only, a fixed list. Never a player or a bet id: every label value
 # is a time series of its own.
 
+import os
 import time
 
-from prometheus_client import Counter, Gauge, Histogram, disable_created_metrics, start_http_server
+from prometheus_client import Counter, Gauge, Histogram, Info, disable_created_metrics, start_http_server
 
 # Without this, every counter gets a second series, <name>_created, holding when the
 # counter was made. Nothing here uses it; off, there are half as many series.
 disable_created_metrics()
+BUILD = Info("antifraud_build", "Source revision baked into this image.")
+BUILD.info({"version": os.environ.get("BUILD_VERSION", "local")})
 
 # The tables a tick adds rows to, counted by how far their newest id moved. The
 # generator is their only writer, so the difference is exactly the rows it wrote.

@@ -28,6 +28,11 @@ COPY db/migrate.py /app/db/migrate.py
 COPY db/migrations/ /app/db/migrations/
 COPY generator/*.py /app/generator/
 
+ARG BUILD_VERSION=local
+ENV BUILD_VERSION=${BUILD_VERSION}
+LABEL org.opencontainers.image.revision=${BUILD_VERSION} \
+    org.opencontainers.image.source="https://github.com/druidpwnz/antifraud_lab"
+
 # The generator's modules import each other by plain name (import config), so it
 # runs from its own folder - as locally.
 WORKDIR /app/generator

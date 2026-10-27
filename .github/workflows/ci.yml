@@ -68,7 +68,7 @@ jobs:
         working-directory: admin
         run: python -m pytest -q
 
-      - name: Monitoring check tests
+      - name: CI helper tests
         run: python -m pytest -q ci/tests
 
   api:
@@ -170,11 +170,14 @@ jobs:
 
   stack:
     name: Full stack
+    needs: [checks, api, rules]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       # Separate from the home lab's fixed Compose name. Volumes are disposable.
       COMPOSE_PROJECT_NAME: antifraud-ci
+      BUILD_VERSION: ${{ github.sha }}
+      IMAGE_TAG: ${{ github.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -202,6 +205,9 @@ jobs:
 
       - name: Seed invariants
         run: docker compose exec -T postgres psql -U antifraud -d antifraud -v ON_ERROR_STOP=1 -f - < db/tests/invariants.sql
+
+      - name: Verify image versions and platform
+        run: python ci/check_images.py
 
       - name: Postman collection against the real API
         run: |
@@ -238,6 +244,25 @@ jobs:
 
       - name: Invariants after live catch-up
         run: docker compose exec -T postgres psql -U antifraud -d antifraud -v ON_ERROR_STOP=1 -f - < db/tests/invariants.sql
+
+      - name: Save the images that passed the stack checks
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'druidpwnz/antifraud_lab'
+        run: |
+          docker save \
+            "ghcr.io/druidpwnz/antifraud-api:$IMAGE_TAG" \
+            "ghcr.io/druidpwnz/antifraud-admin:$IMAGE_TAG" \
+            "ghcr.io/druidpwnz/antifraud-rules:$IMAGE_TAG" \
+            "ghcr.io/druidpwnz/antifraud-generator:$IMAGE_TAG" | gzip > "$RUNNER_TEMP/tested-images.tar.gz"
+
+      - name: Hand tested images to the publishing workflow
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'druidpwnz/antifraud_lab'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tested-images-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/tested-images.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
 
       - name: Container status and logs on failure
         if: failure()

@@ -44,7 +44,10 @@ x-generator-image: &generator-image
   build:
     context: .
     dockerfile: generator/Dockerfile
-  image: antifraud/generator
+    args:
+      BUILD_VERSION: ${BUILD_VERSION:-local}
+  image: ghcr.io/druidpwnz/antifraud-generator:${IMAGE_TAG:-local}
+  pull_policy: never # Local up builds; deployment explicitly pulls a pinned SHA.
   networks: [db]
   logging: *logging
 
@@ -120,8 +123,12 @@ services:
   # its last run, into the alerts table. Needs only the schema - it follows the
   # data as the seed and the generator write it.
   rules:
-    build: ./rules
-    image: antifraud/rules
+    build:
+      context: ./rules
+      args:
+        BUILD_VERSION: ${BUILD_VERSION:-local}
+    image: ghcr.io/druidpwnz/antifraud-rules:${IMAGE_TAG:-local}
+    pull_policy: never
     environment:
       <<: *db-env
       RUN_EVERY_SECONDS: ${RULES_EVERY_SECONDS:-60}
@@ -134,8 +141,12 @@ services:
     logging: *logging
 
   api:
-    build: ./api
-    image: antifraud/api
+    build:
+      context: ./api
+      args:
+        BUILD_VERSION: ${BUILD_VERSION:-local}
+    image: ghcr.io/druidpwnz/antifraud-api:${IMAGE_TAG:-local}
+    pull_policy: never
     environment:
       <<: *db-env
       API_KEYS: ${API_KEYS:?set API_KEYS in .env - cp .env.example .env}
@@ -163,8 +174,12 @@ services:
     logging: *logging
 
   admin:
-    build: ./admin
-    image: antifraud/admin
+    build:
+      context: ./admin
+      args:
+        BUILD_VERSION: ${BUILD_VERSION:-local}
+    image: ghcr.io/druidpwnz/antifraud-admin:${IMAGE_TAG:-local}
+    pull_policy: never
     environment:
       API_URL: http://api:8000          # the service name - Docker's DNS resolves it
       API_KEY: ${PANEL_API_KEY:?set PANEL_API_KEY in .env - cp .env.example .env}
@@ -174,6 +189,7 @@ services:
       ADMIN_USERS: ${ADMIN_USERS:?set ADMIN_USERS in .env - cp .env.example .env}
       SESSION_HOURS: ${SESSION_HOURS:-8}
       SECURE_COOKIES: ${SECURE_COOKIES:-0}
+      METRICS_PORT: 9100              # build identity; internal, not published
     depends_on:
       api:
         condition: service_healthy

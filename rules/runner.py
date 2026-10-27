@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import psycopg
-from prometheus_client import Counter, Gauge, Histogram, disable_created_metrics, start_http_server
+from prometheus_client import Counter, Gauge, Histogram, Info, disable_created_metrics, start_http_server
 from psycopg import sql
 
 DSN = os.environ.get("DATABASE_URL", "dbname=antifraud")
@@ -56,6 +56,8 @@ RULES = [
 # Without this, every counter gets a second series, <name>_created, holding when the
 # counter was made. Nothing here uses it; off, there are half as many series.
 disable_created_metrics()
+BUILD = Info("antifraud_build", "Source revision baked into this image.")
+BUILD.info({"version": os.environ.get("BUILD_VERSION", "local")})
 
 # --- metrics. Labels: rule_code and severity only - a fixed, small set. Never a
 #     player or a bet: every label value is a time series of its own. ---

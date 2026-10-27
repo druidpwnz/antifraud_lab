@@ -17,6 +17,11 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 COPY app/ ./app/
 
+ARG BUILD_VERSION=local
+ENV BUILD_VERSION=${BUILD_VERSION}
+LABEL org.opencontainers.image.revision=${BUILD_VERSION} \
+    org.opencontainers.image.source="https://github.com/druidpwnz/antifraud_lab"
+
 USER app
 EXPOSE 8000
 

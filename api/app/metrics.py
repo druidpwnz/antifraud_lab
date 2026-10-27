@@ -19,16 +19,19 @@ uvicorn worker that runs today. Several workers would each have their own counte
 and would need prometheus_client's multiprocess mode.
 """
 
+import os
 import re
 import time
 
-from prometheus_client import Counter, Histogram, disable_created_metrics, start_http_server
+from prometheus_client import Counter, Histogram, Info, disable_created_metrics, start_http_server
 from starlette.routing import compile_path
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 # Without this, every counter gets a second series, <name>_created, holding when the
 # counter was made. Nothing here uses it; off, there are half as many series.
 disable_created_metrics()
+BUILD = Info("antifraud_build", "Source revision baked into this image.")
+BUILD.info({"version": os.environ.get("BUILD_VERSION", "local")})
 
 REQUESTS = Counter(
     "api_requests_total",

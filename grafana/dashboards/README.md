@@ -5,7 +5,7 @@ the **Antifraud Lab** folder, re-read every 30 seconds.
 
 | File | Dashboard | Datasource | Time |
 |---|---|---|---|
-| `ops.json` | **Ops** — services up, the generator's lag, the rules runner, API traffic and latency | Prometheus | real |
+| `ops.json` | **Ops** — running build versions, services up, the generator's lag, the rules runner, API traffic and latency | Prometheus | real |
 | `fraud.json` | **Fraud** — detections per hour by rule, the players with most alerts, the latest alerts | Postgres | simulated |
 | `scoring.json` | **Scoring** — precision and recall per rule, caught / missed / false alarms | Postgres (`rule_scores` view) | — |
 | `money.json` | **Money** — deposits vs withdrawals, staked vs paid out, house margin, one currency at a time | Postgres | simulated |
@@ -13,6 +13,11 @@ the **Antifraud Lab** folder, re-read every 30 seconds.
 The Fraud dashboard links player and bet numbers to the admin panel; its **Admin
 panel** box at the top says where that is (default `http://localhost:5000` — change
 it if `PANEL_PORT` is different).
+
+Ops has a **Running build versions** table, one row per Python service, from
+`antifraud_build_info`. Published images show their full source commit; development
+builds show `local`. Prometheus now also scrapes the admin panel's internal port
+9100, where Gunicorn's master exposes only build identity (not per-worker counters).
 
 ## Changing one
 

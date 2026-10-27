@@ -26,6 +26,10 @@ scrape_configs:
     static_configs:
       - targets: ["rules:9100"]
 
+  - job_name: admin
+    static_configs:
+      - targets: ["admin:9100"]
+
   # Prometheus about itself: samples stored, scrape durations, its own memory
   - job_name: prometheus
     static_configs:
