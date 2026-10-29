@@ -1,0 +1,9 @@
+[Unit]
+Description=Update Antifraud Lab to its tested GHCR release
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/antifraud/deploy.env
+ExecStart=/usr/bin/bash %h/.local/lib/antifraud/update.sh
+TimeoutStartSec=20min
+UMask=0077

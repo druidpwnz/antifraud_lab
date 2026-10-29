@@ -70,6 +70,10 @@ Developing without Docker — venv, local Postgres, `uvicorn --reload`, `flask r
 is in the service READMEs: [`api/`](api/README.md), [`admin/`](admin/README.md),
 [`db/`](db/README.md).
 
+For a home server following published images automatically, see
+[`deploy/`](deploy/README.md). After installing its updater, use that updater for
+server changes; it manages the pinned image version and detached Git checkout.
+
 ---
 
 ## Status
@@ -86,7 +90,7 @@ is in the service READMEs: [`api/`](api/README.md), [`admin/`](admin/README.md),
 | 7 | Admin panel — Flask + Jinja + HTMX, over the API | **done** — players, bets, events; 141 tests |
 | 8 | Compose, for real | **done** — one `docker compose up -d`, six services (nine since phase 9) |
 | 9 | Detection rules, Prometheus, Grafana — fraud alerting | **done** — 3 rules, 4 dashboards, 9 alerts |
-| 10 | CI/CD — GitHub Actions | **in progress** — full-stack CI green; image publishing and build versions added |
+| 10 | CI/CD — GitHub Actions | **in progress** — CI and public images verified; updater and timer prepared for server installation |
 
 Done so far: 14-table schema with constraints that hold, a seeded reproducible
 backfill (90 days = 9.7k players, 650k bets, ~10 min), three planted fraud patterns
@@ -1113,7 +1117,7 @@ secret, never anywhere near the home server.
 
 | Job | What it proves | How |
 |---|---|---|
-| checks | lint and secret scanning pass; 141 admin tests and 21 CI-helper tests pass | `ruff check`; `gitleaks` over a full clone; pytest in `admin/` and `ci/tests/` — no database needed |
+| checks | lint and secret scanning pass; 141 admin tests and 42 CI-helper tests pass; deploy units validate | `ruff check`; `gitleaks` over a full clone; pytest in `admin/` and `ci/tests/`; Bash and systemd validation — no database needed |
 | api | 148 tests | pytest against a `postgres:18` service, migrated |
 | rules | 36 tests, including 11 scoring-gate checks | pytest against a `postgres:18` service, migrated |
 | **stack** | it works together, the way it runs at home | below |
@@ -1202,7 +1206,7 @@ CI API, with the public demo keys. It does not require a Postman account or toke
 The stack job is for GitHub's disposable runner; do not copy its `.env` replacement
 or volume-removal commands into the home-server checkout.
 
-### Image publishing — ready for its first GitHub run
+### Image publishing — verified
 
 [`images.yml`](.github/workflows/images.yml) runs after CI completes. Its job requires
 a successful **push to this repository's `main`**, not a PR, a fork, or a manual CI
@@ -1236,8 +1240,12 @@ All image platform/label/environment checks passed. The compressed archive was
 about 76 MiB; saving and loading it preserved all four image IDs. Admin 141,
 API 148, rules 36 and CI helpers 21 tests passed, as did Ruff and actionlint.
 The temporary stack, volumes and image tags were removed; the existing lab kept
-running. Actual artifact transfer on GitHub, GHCR publishing and anonymous pulls
-still need the first pushed run and the package visibility change below.
+running. On 2026-10-28, GitHub confirmed both
+[CI](https://github.com/druidpwnz/antifraud_lab/actions/runs/40578081087) and
+[Images](https://github.com/druidpwnz/antifraud_lab/actions/runs/40578751488) succeeded
+for `4ee91662ce03c900d284fcc1f46e56f94ab6ebef`. After the user made all four packages
+public, anonymous manifest checks with an empty Docker config succeeded for each
+SHA tag and `:main`; the two manifests matched for every service.
 
 After the first successful Images run, make each new package public once:
 **GitHub profile → Packages → antifraud-{api,admin,rules,generator} → Package
@@ -1257,6 +1265,44 @@ done
 
 Each command must succeed; any authentication error means that package is not yet
 public. No images are downloaded and no running containers are changed by this check.
+
+### Pull-based deployment — ready for server installation
+
+[`deploy/`](deploy/README.md) contains the updater and a systemd user timer.
+Installation, preflight, first deployment, logs, rollback and re-enabling updates
+are documented there. The user performs these steps on the existing home-server
+checkout; no installation or production migration is run from the development
+machine.
+
+The updater validates the release's Git commit, target Compose config and images
+before stopping services. It stops writers before migrations, replaces containers
+without building, reloads monitoring and requires readiness plus matching image IDs
+and live build metrics. It preserves `.env` and all named volumes, rejects local
+changes, and locks against concurrent attempts. A healthy unchanged release is a
+no-op. Successful/previous and pending release records live outside the checkout.
+
+The installed updater also lives outside the checkout so rollback works even to a
+commit predating `deploy/`. Rollback pins a published SHA and keeps the applied
+database schema; disable the timer first. A failure never advances the successful
+release record and is reported in the systemd journal. Server installation and the
+push-to-server/rollback proof remain pending.
+
+Verification on 2026-10-28: 42 helper tests passed, including 15 updater scenarios
+with real temporary Git checkouts and fake Docker commands, plus six deployment
+health checks. Bash syntax, Ruff and systemd unit verification passed. A separate
+temporary Docker project then exercised the real updater through release A,
+release B and rollback to A: a database marker and the exact PostgreSQL volume
+survived every transition. A predates the `deploy/` directory, proving that the
+installed updater remains usable outside the checkout. An unchanged healthy
+release was a no-op. Registry pulls in that fixture used locally built images;
+the real public registry was verified in step 4. Temporary containers, volumes and
+image tags were removed afterward.
+
+That test caught old build samples retained across Prometheus restarts. Both the
+deployment probe and Ops version table now select the newest sample per service;
+the probe additionally rejects samples older than 60 seconds and unexpected
+versions. This allows a real deployment or rollback to pass without waiting for
+old version labels to expire.
 
 ### Traps to plan for
 
@@ -1283,6 +1329,8 @@ ci/tests/test_monitoring.py     missing/down monitoring must fail the check
 ci/check_images.py              image platform, OCI labels and runtime version
 ci/publish_images.sh            push commit tags, then promote current main
 deploy/update.sh                on the server: newer :main? check out, pull, up -d
+deploy/update.py                preflight, checkout, health checks and release records
+deploy/healthcheck.py           probe run inside the API container
 deploy/antifraud-update.{service,timer}   systemd, every 5 minutes
 ```
 
@@ -1302,11 +1350,13 @@ deploy/antifraud-update.{service,timer}   systemd, every 5 minutes
       GitHub run at `55ec110`, confirmed by the user
 - [x] 3. CI, the stack job: compose, invariants, Newman, the scoring gate, the live
       generator, Grafana and Prometheus — green at `23da8ad`, confirmed by the user
-- [ ] 4. Images: `build_info` metric and the version on the Ops dashboard; image
-      names in compose; publish tested images on green `main` — implemented;
-      first Images run and making its packages public are pending
+- [x] 4. Images: `build_info` metric and the version on the Ops dashboard; image
+      names in compose; publish tested images on green `main` — CI and Images
+      green at `4ee9166`; all four packages public, anonymous SHA/main manifest
+      checks passed on 2026-10-28
 - [ ] 5. Deploy: `deploy/update.sh` and the systemd timer, installed on the home
-      server; a change pushed from the laptop shows up on the server by itself
+      server; a change pushed from the laptop shows up on the server by itself —
+      updater, timer and recovery tests implemented; server installation pending
 - [ ] 6. Docs: this section, the quick start, and a *Going public* checklist —
       branch protection, approval for first-time contributors' workflows, GitHub
       secret scanning, Dependabot

@@ -18,6 +18,8 @@ Ops has a **Running build versions** table, one row per Python service, from
 `antifraud_build_info`. Published images show their full source commit; development
 builds show `local`. Prometheus now also scrapes the admin panel's internal port
 9100, where Gunicorn's master exposes only build identity (not per-worker counters).
+The table selects the newest sample per service, so old build labels retained
+briefly after a Prometheus restart do not create duplicate rows.
 
 ## Changing one
 

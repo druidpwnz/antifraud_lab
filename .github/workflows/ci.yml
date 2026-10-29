@@ -71,6 +71,11 @@ jobs:
       - name: CI helper tests
         run: python -m pytest -q ci/tests
 
+      - name: Deployment script and systemd unit validation
+        run: |
+          bash -n deploy/update.sh ci/publish_images.sh
+          systemd-analyze verify deploy/antifraud-update.service deploy/antifraud-update.timer
+
   api:
     name: API tests
     runs-on: ubuntu-24.04

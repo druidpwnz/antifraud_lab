@@ -1,0 +1,10 @@
+[Unit]
+Description=Check for an Antifraud Lab release every five minutes
+
+[Timer]
+OnStartupSec=2min
+OnUnitInactiveSec=5min
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

@@ -8,7 +8,7 @@
   "editable": false,
   "graphTooltip": 1,
   "schemaVersion": 41,
-  "version": 2,
+  "version": 3,
   "timezone": "utc",
   "time": {
     "from": "now-3h",
@@ -329,7 +329,7 @@
       "id": 12,
       "type": "table",
       "title": "Running build versions",
-      "description": "Source revision baked into each service image. local means a development build. All four services should show the same commit after deployment.",
+      "description": "Source revision baked into each service image. local means a development build. All four services should show the same commit after deployment. Shows the most recently scraped version per service so old samples retained after a Prometheus restart do not duplicate rows.",
       "gridPos": {
         "x": 0,
         "y": 4,
@@ -343,7 +343,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "antifraud_build_info",
+          "expr": "topk by (job) (1, timestamp(antifraud_build_info))",
           "format": "table",
           "instant": true,
           "range": false,
