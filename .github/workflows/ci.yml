@@ -173,9 +173,28 @@ jobs:
         working-directory: rules
         run: python -m pytest -q
 
+  deploy:
+    name: Updater on Python 3.11.2
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11.2'
+
+      - name: Install test dependencies
+        run: python -m pip install 'pytest==9.1.*'
+
+      - name: Updater and deployment health tests
+        run: python -m pytest -q ci/tests/test_deploy.py ci/tests/test_deploy_health.py
+
   stack:
     name: Full stack
-    needs: [checks, api, rules]
+    needs: [checks, api, rules, deploy]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:

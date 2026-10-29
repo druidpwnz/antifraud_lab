@@ -6,7 +6,6 @@ import json
 import os
 import re
 import subprocess
-import tarfile
 import tempfile
 import time
 from pathlib import Path
@@ -145,11 +144,10 @@ class Updater:
         # Validate the target config before checkout or stopping any service. Resolve
         # bind mounts against the real checkout, which will receive this commit.
         with tempfile.TemporaryDirectory(prefix="antifraud-release-") as directory:
-            archive = Path(directory) / "release.tar"
-            self.git("archive", "--format=tar", f"--output={archive}", requested)
-            with tarfile.open(archive) as source:
-                source.extractall(directory, filter="data")
             config = Path(directory) / "docker-compose.yml"
+            # Only Compose's single root file is needed before checkout. Reading
+            # it directly also supports Python 3.11.2 without tar extraction APIs.
+            config.write_text(self.run("git", "show", f"{requested}:docker-compose.yml").stdout)
             self.compose(config, "config", "--quiet")
             self.compose(config, "pull", "--policy", "always", timeout=600)
             self.verify_images()

@@ -29,10 +29,18 @@ forces a Git checkout. There is a short interruption while services are replaced
 
 ## Install once on the home server
 
-Requirements: Python **3.12+**, Git, Bash, systemd user services, Docker Engine and
+Requirements: Python **3.11+** (including 3.11.2), Git, Bash, systemd user services, Docker Engine and
 the Compose plugin already used by the lab. The server account must be able to use
 Docker and fetch this repository without an interactive password/passphrase. The
 timer uses that same account; a login-session-only SSH agent may not survive logout.
+
+This Python requirement is for the host updater. The application services carry
+Python 3.14 inside their Docker images. CI checks the updater on Python 3.11.2 as
+well as the project's development Python. Preflight reads the target Compose file
+directly from Git, so no newer archive-extraction API is needed.
+On 2026-10-29, all 21 updater/health tests passed on the exact Python 3.11.2
+runtime as well as the development Python 3.14. Ruff uses a Python 3.11 target
+for the host updater and its compatibility tests.
 
 First push the deployment change from the laptop and wait for **CI** and **Images**
 to turn green. Run the following **on the home server**, in its existing lab

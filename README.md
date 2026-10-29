@@ -1079,7 +1079,7 @@ suite, and the whole stack started with compose the way it runs at home. A green
 itself within minutes. A red one never leaves GitHub.
 
 ```
- push ──> CI: checks · api · rules ──> stack (build images, test together)
+ push ──> CI: checks · api · rules · deploy ──> stack (build images, test together)
                                       │ all green, push to main only
                                       v
                          short-lived artifact: the tested images
@@ -1103,7 +1103,7 @@ secret, never anywhere near the home server.
 | Images | Public on `ghcr.io`, one per service we build, tagged with the full commit SHA and `main`. `linux/amd64` (the home server is x86_64) | The image that passed the tests is the image that runs. Public: no token on the server, and the code inside is the code the repo will publish. No passwords in any image — they stay in `.env` |
 | Compose | `image: ghcr.io/druidpwnz/antifraud-api:${IMAGE_TAG:-local}` next to `build:`, with `pull_policy: never` | `up --build` builds locally without trying to pull an unpublished `:local`. Deployment will set `IMAGE_TAG`, explicitly `pull --policy always`, then start with `--no-build` |
 | Which version runs | Each service exports `antifraud_build_info{version="<sha>"}`; the *Ops* dashboard shows it | No runner means no deploy in the Actions tab — the lab says itself what it runs |
-| Runners | GitHub-hosted `ubuntu-24.04`, Python 3.14, `postgres:18` service containers | The same Postgres as compose. Throwaway machines are what makes running pull requests safe |
+| Runners | GitHub-hosted `ubuntu-24.04`, Python 3.14, `postgres:18` service containers; a separate updater check uses Python 3.11.2 | The same Postgres as compose. The updater also supports the home server's Python. Throwaway machines are what makes running pull requests safe |
 | Permissions | `contents: read` for every job; `packages: write` only for the image job; never `pull_request_target`; image and deploy only on a push to `main` of this repo, not a fork | Least privilege, written down per job. `pull_request_target` runs a fork's code with this repo's secrets — the classic way public repos get burgled |
 | Actions | Pinned to a full commit SHA, the version in a comment | A tag can be moved to other code; a SHA cannot |
 | Tested images | The stack job saves its four images as one compressed artifact; Images loads them instead of rebuilding. One-day retention, deleted after a successful publish | Rebuilding after CI could resolve newer dependencies or a newer base image. Transferring the tested images preserves their image IDs; short retention limits Actions storage |
@@ -1120,6 +1120,7 @@ secret, never anywhere near the home server.
 | checks | lint and secret scanning pass; 141 admin tests and 42 CI-helper tests pass; deploy units validate | `ruff check`; `gitleaks` over a full clone; pytest in `admin/` and `ci/tests/`; Bash and systemd validation — no database needed |
 | api | 148 tests | pytest against a `postgres:18` service, migrated |
 | rules | 36 tests, including 11 scoring-gate checks | pytest against a `postgres:18` service, migrated |
+| deploy | 21 updater/health tests on the server's Python 3.11.2 | pytest with temporary Git checkouts and fake Docker commands; no services started |
 | **stack** | it works together, the way it runs at home | below |
 
 The stack job is the one that matters most:
@@ -1145,14 +1146,15 @@ The stack job is the one that matters most:
 
 ### CI workflow
 
-[`ci.yml`](.github/workflows/ci.yml) implements `checks`, `api`, `rules` and `stack`.
+[`ci.yml`](.github/workflows/ci.yml) implements `checks`, `api`, `rules`, `deploy` and `stack`.
 The first three jobs passed on GitHub at `55ec110`; the stack job passed at
 `23da8ad`, confirmed by the user. The workflow runs on branch pushes and pull requests,
 skips changes consisting only of Markdown files, and can also be started manually
 from **Actions → CI → Run workflow**. A newer run cancels the previous run for the
-same event and ref. The first three jobs run in parallel; the stack job waits for
-them to pass so a failed fast check avoids an expensive build. The first three jobs have a 10-minute timeout; the stack job
-has 20 minutes for image builds and the integration checks.
+same event and ref. Checks, API, rules and updater compatibility run in parallel;
+the stack job waits for all four to pass so a failed fast check avoids an expensive
+build. The original three checks have a 10-minute timeout, updater compatibility
+has five minutes, and the stack job has 20 minutes for builds and integration checks.
 
 The database jobs each get a separate PostgreSQL 18 service container. Both apply
 all seven migrations to `antifraud_test` before running pytest. The generator is
@@ -1176,9 +1178,9 @@ The first green GitHub run subsequently verified dependency installation and
 service-container startup for those three jobs.
 
 Keep GitHub's Actions billing settings within the $0 requirement above. After
-reviewing and committing a change, push and open **Actions → CI**. Expect four
-green jobs: **Lint, secrets, admin**, **API tests**, **Detection rule tests**, and
-**Full stack**. CLI alternative: `gh run list --workflow ci.yml`,
+reviewing and committing a change, push and open **Actions → CI**. Expect five
+green jobs: **Lint, secrets, admin**, **API tests**, **Detection rule tests**,
+**Updater on Python 3.11.2**, and **Full stack**. CLI alternative: `gh run list --workflow ci.yml`,
 then `gh run watch RUN_ID --exit-status`; for a failure,
 `gh run view RUN_ID --log-failed`.
 
@@ -1303,6 +1305,12 @@ deployment probe and Ops version table now select the newest sample per service;
 the probe additionally rejects samples older than 60 seconds and unexpected
 versions. This allows a real deployment or rollback to pass without waiting for
 old version labels to expire.
+
+The home server uses Python 3.11.2. On 2026-10-29, preflight was simplified to read
+the target `docker-compose.yml` directly with `git show`, removing the newer tar
+extraction API requirement. All 21 updater/health tests passed on Python 3.11.2
+and 3.14; a dedicated 3.11.2 CI job now gates the stack build. Ruff also targets
+Python 3.11 for the updater and these tests. Application images still use 3.14.
 
 ### Traps to plan for
 

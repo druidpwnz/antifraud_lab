@@ -50,6 +50,9 @@ elif args[0] == 'compose':
     config = Path(args[args.index('-f') + 1])
     command = args[args.index('-f') + 2:]
     assert config.exists(), config
+    if command[0] == 'config':
+        expected = 'second' if version == state['target'] else 'first'
+        assert f'# {expected} release' in config.read_text(), 'preflight used the wrong commit config'
     if command[0] == 'config' and state.get('fail') == 'config': fail('missing required env')
     if command[0] == 'pull' and state.get('fail') == 'pull': fail('SHA image unavailable')
     if command[0] == 'run' and command[-1] == 'migrate' and state.get('fail') == 'migration':
@@ -80,10 +83,11 @@ def deployment(tmp_path):
     git("config", "user.name", "Deploy test")
     git("config", "user.email", "deploy@example.invalid")
     (origin / ".gitignore").write_text(".env\n")
-    (origin / "docker-compose.yml").write_text("name: antifraud\nservices: {}\n")
+    (origin / "docker-compose.yml").write_text("name: antifraud\nservices: {}\n# first release\n")
     git("add", ".")
     git("-c", "commit.gpgsign=false", "commit", "-qm", "first release")
     first = git("rev-parse", "HEAD")
+    (origin / "docker-compose.yml").write_text("name: antifraud\nservices: {}\n# second release\n")
     (origin / "release.txt").write_text("second release\n")
     git("add", ".")
     git("-c", "commit.gpgsign=false", "commit", "-qm", "second release")
@@ -178,6 +182,7 @@ def test_preflight_only_preserves_checkout_services_and_state(deployment):
     assert d.head() == d.first
     assert not any("stop" in call or "up" in call for call in d.calls())
     assert not (d.state_dir / "state.json").exists()
+    assert "# first release" in (d.repo / "docker-compose.yml").read_text()
 
 
 @pytest.mark.parametrize("stage", ["migration", "health"])

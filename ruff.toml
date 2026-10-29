@@ -10,6 +10,11 @@ line-length = 120
 # a Python package.
 src = ["generator", "api", "admin", "rules"]
 
+[per-file-target-version]
+# The host updater also runs on the server's Python 3.11.2.
+"deploy/*.py" = "py311"
+"ci/tests/test_deploy*.py" = "py311"
+
 [lint]
 # Chosen by hand rather than ruff's defaults, which change between versions.
 select = [
