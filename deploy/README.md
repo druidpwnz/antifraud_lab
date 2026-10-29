@@ -4,6 +4,12 @@ The server follows the public `antifraud-generator:main` image. Its source revis
 selects one commit and all four full-SHA image tags. GitHub never connects to the
 server. A systemd **user** timer runs the updater about every five minutes.
 
+On 2026-10-29 the user confirmed that deployment works on the home server using
+Python 3.11.2. The commands below remain the installation/recovery reference.
+Automatic pickup of a subsequent release, timer behavior after logout/reboot and
+rollback on the real server remain separate checks; see the
+[final checklist](../docs/GOING_PUBLIC.md#final-proof).
+
 ## What an update does
 
 1. Refuse a dirty deployment checkout and acquire a lock against overlapping runs.

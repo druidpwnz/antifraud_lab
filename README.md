@@ -1,4 +1,4 @@
-# Antifraud Lab — Build Plan
+# Antifraud Lab
 
 A self-contained fraud-detection lab running on the home server: a generator that
 produces production-like betting and payment traffic with deliberately planted fraud,
@@ -17,7 +17,7 @@ Needs only Docker Engine with the Compose plugin — no Python, no Postgres:
 ```bash
 git clone https://github.com/druidpwnz/antifraud_lab && cd antifraud_lab
 cp .env.example .env
-docker compose up -d
+docker compose up -d --build
 ```
 
 The first `up` builds four images and generates 14 days of history, about a
@@ -46,15 +46,21 @@ docker compose ps                    # everything Up / healthy; migrate and seed
 docker compose logs -f generator     # watch it catch up
 docker compose logs -f rules         # one line per rule that found new rows
 docker compose down                  # stop, KEEP the data
-docker compose down -v               # stop and DELETE the data - the next up starts fresh
-git pull && docker compose up -d --build     # after an update
 ```
+
+For a development checkout, update with `git pull --ff-only` and
+`docker compose up -d --build`. For a managed home-server deployment, use the
+[updater](deploy/README.md#status-and-immediate-checks). To reset a disposable lab
+completely, `docker compose down -v` deletes its database and monitoring volumes;
+the next start generates a fresh dataset.
 
 **Before anyone but you can reach it,** change the passwords and keys in `.env` —
 the demo values are public, in this repo. Do it before the first `up`:
-`POSTGRES_PASSWORD` and `GRAFANA_ADMIN_PASSWORD` are only used when their database
-is created, so changing them later does nothing until `down -v` (Grafana's can be
-reset: `docker compose exec grafana grafana cli admin reset-admin-password <new>`). A new panel user:
+`POSTGRES_PASSWORD` and `GRAFANA_ADMIN_PASSWORD` initialize stored accounts on the
+first start. For an existing installation, changing `.env` alone does not rotate
+their stored passwords: update the Postgres role separately, and reset Grafana's
+with `docker compose exec grafana grafana cli admin reset-admin-password <new>`.
+Keep `.env` synchronized with those accounts. A new panel user:
 `docker compose exec admin flask --app app hash-password <name>`, the printed line
 into `ADMIN_USERS` (in single quotes), then `docker compose up -d`.
 
@@ -74,6 +80,10 @@ For a home server following published images automatically, see
 [`deploy/`](deploy/README.md). After installing its updater, use that updater for
 server changes; it manages the pinned image version and detached Git checkout.
 
+The final [going-public checklist](docs/GOING_PUBLIC.md) covers main-branch
+protection, contributor workflow approval, secret scanning and dependency updates.
+The repository is still private; publishing it is a separate owner action.
+
 ---
 
 ## Status
@@ -90,7 +100,7 @@ server changes; it manages the pinned image version and detached Git checkout.
 | 7 | Admin panel — Flask + Jinja + HTMX, over the API | **done** — players, bets, events; 141 tests |
 | 8 | Compose, for real | **done** — one `docker compose up -d`, six services (nine since phase 9) |
 | 9 | Detection rules, Prometheus, Grafana — fraud alerting | **done** — 3 rules, 4 dashboards, 9 alerts |
-| 10 | CI/CD — GitHub Actions | **in progress** — CI and public images verified; updater and timer prepared for server installation |
+| 10 | CI/CD — GitHub Actions | **implemented** — CI/images green; server deployment confirmed; final operational/public-repo checks listed below |
 
 Done so far: 14-table schema with constraints that hold, a seeded reproducible
 backfill (90 days = 9.7k players, 650k bets, ~10 min), three planted fraud patterns
@@ -310,7 +320,7 @@ player's half-finished session would have to survive between ticks and restarts)
 
 ## Phase 5 — Thin alerting (postponed until after the API)
 
-**Now part of [phase 9](#phase-9--detection-prometheus-grafana-where-fraud-becomes-an-alert-next),
+**Now part of [phase 9](#phase-9--detection-prometheus-grafana-where-fraud-becomes-an-alert-done),
 as its first steps.** The plan below is what it grew from.
 
 Not the old phase 3. No window-function tuning, no threshold optimisation. This
@@ -1071,7 +1081,7 @@ Run on a fresh `git clone` of the step 8 commit, on a throwaway stack, on 2026-1
 
 ---
 
-## Phase 10 — CI/CD with GitHub Actions (in progress)
+## Phase 10 — CI/CD with GitHub Actions (implemented)
 
 **The goal:** every push is checked by GitHub — lint, a secret scan, every test
 suite, and the whole stack started with compose the way it runs at home. A green
@@ -1111,7 +1121,7 @@ secret, never anywhere near the home server.
 | Lint | `ruff check`, version pinned, config in `ruff.toml` at the root, over generator, api, admin, rules. No reformatting | Finds real mistakes (unused imports, undefined names, bare `except`); a mass reformat would bury every later diff |
 | Secret scan | `gitleaks` over the **whole history**, every push | Once public, every old commit is public too. It has to be clean before, not only from now on |
 | Git flow | Straight to `main` while private: CI on every push, images only when it is green. Once public: branch protection, changes through pull requests | On a free private repo a red check cannot block anything; on a public one it can |
-| Cost | **$0, and it has to stay $0.** Linux runners only. Private: 2,000 minutes a month; each job is billed separately and rounded up to a whole minute, so a push costs about 12–15 — some 130 pushes a month. Public: unlimited. Public images on `ghcr.io` are free. No payment method on the GitHub account (or an Actions budget of $0): when minutes run out, workflows stop until the next month instead of costing anything | Saving minutes: a push that changes only `.md` files runs no CI; a newer push cancels the run of an older one on the same branch; the small checks (lint, secrets, admin tests) share one job |
+| Cost | **$0, and it has to stay $0.** Linux runners only; keep the account's Actions spending limit at $0 and monitor minutes/storage. Adding compatibility tests changes the cost per run, so use actual Actions usage rather than a fixed pushes-per-month estimate | Markdown-only direct pushes skip CI; all PRs run the required checks. Newer runs cancel older ones for the same branch and event; Dependabot checks weekly with limited open PRs; successful image publication deletes its transfer artifact |
 
 ### CI — on every push and every pull request
 
@@ -1148,8 +1158,12 @@ The stack job is the one that matters most:
 
 [`ci.yml`](.github/workflows/ci.yml) implements `checks`, `api`, `rules`, `deploy` and `stack`.
 The first three jobs passed on GitHub at `55ec110`; the stack job passed at
-`23da8ad`, confirmed by the user. The workflow runs on branch pushes and pull requests,
-skips changes consisting only of Markdown files, and can also be started manually
+`23da8ad`, confirmed by the user. All five jobs and Images passed at `8119d65`:
+[CI](https://github.com/druidpwnz/antifraud_lab/actions/runs/40927020632),
+[Images](https://github.com/druidpwnz/antifraud_lab/actions/runs/40927699476).
+The workflow runs on branch pushes and all pull requests. Only Markdown-only
+direct pushes are skipped; a documentation PR must report required status checks
+before protected main can accept it. CI can also be started manually
 from **Actions → CI → Run workflow**. A newer run cancels the previous run for the
 same event and ref. Checks, API, rules and updater compatibility run in parallel;
 the stack job waits for all four to pass so a failed fast check avoids an expensive
@@ -1268,7 +1282,7 @@ done
 Each command must succeed; any authentication error means that package is not yet
 public. No images are downloaded and no running containers are changed by this check.
 
-### Pull-based deployment — ready for server installation
+### Pull-based deployment — working on the server
 
 [`deploy/`](deploy/README.md) contains the updater and a systemd user timer.
 Installation, preflight, first deployment, logs, rollback and re-enabling updates
@@ -1286,8 +1300,10 @@ no-op. Successful/previous and pending release records live outside the checkout
 The installed updater also lives outside the checkout so rollback works even to a
 commit predating `deploy/`. Rollback pins a published SHA and keeps the applied
 database schema; disable the timer first. A failure never advances the successful
-release record and is reported in the systemd journal. Server installation and the
-push-to-server/rollback proof remain pending.
+release record and is reported in the systemd journal. On 2026-10-29 the user
+confirmed that deployment works. Automatic rollout after a subsequent push,
+timer behavior after logout/reboot, and rollback on the home server have not been
+separately reported; these remain operational checks, not missing implementation.
 
 Verification on 2026-10-28: 42 helper tests passed, including 15 updater scenarios
 with real temporary Git checkouts and fake Docker commands, plus six deployment
@@ -1311,6 +1327,25 @@ the target `docker-compose.yml` directly with `git show`, removing the newer tar
 extraction API requirement. All 21 updater/health tests passed on Python 3.11.2
 and 3.14; a dedicated 3.11.2 CI job now gates the stack build. Ruff also targets
 Python 3.11 for the updater and these tests. Application images still use 3.14.
+
+### Public-repository preparation and maintenance
+
+The [going-public checklist](docs/GOING_PUBLIC.md) covers the owner's remaining
+GitHub settings: visibility, main-branch protection with the five CI job names,
+approval of outside contributors' workflow runs, secret scanning and Dependabot.
+These settings are not changed by committing files to this repository.
+
+[Dependabot](.github/dependabot.yml) checks pinned GitHub Actions and Python
+requirements weekly on Monday at 09:00 Europe/Kyiv. It limits open version-update
+PRs to two per ecosystem, groups action minor/patch updates, and groups shared
+Python package updates across service directories by dependency name. Changes
+still need review and green CI before merging. Docker and inline tool version
+updates remain manual. The first Dependabot update run is pending the config push.
+
+On 2026-10-29 the full-history Gitleaks scan passed over 47 existing commits. The
+final workflow change also ensures Markdown-only PRs report CI statuses: skipping
+the entire PR workflow by path would leave required checks pending. Markdown-only
+direct pushes retain their cost-saving skip.
 
 ### Traps to plan for
 
@@ -1340,6 +1375,8 @@ deploy/update.sh                on the server: newer :main? check out, pull, up 
 deploy/update.py                preflight, checkout, health checks and release records
 deploy/healthcheck.py           probe run inside the API container
 deploy/antifraud-update.{service,timer}   systemd, every 5 minutes
+.github/dependabot.yml          weekly dependency-update PRs
+docs/GOING_PUBLIC.md            owner settings and final operational checks
 ```
 
 ### Build order — one step at a time, reviewed before the next
@@ -1362,21 +1399,26 @@ deploy/antifraud-update.{service,timer}   systemd, every 5 minutes
       names in compose; publish tested images on green `main` — CI and Images
       green at `4ee9166`; all four packages public, anonymous SHA/main manifest
       checks passed on 2026-10-28
-- [ ] 5. Deploy: `deploy/update.sh` and the systemd timer, installed on the home
-      server; a change pushed from the laptop shows up on the server by itself —
-      updater, timer and recovery tests implemented; server installation pending
-- [ ] 6. Docs: this section, the quick start, and a *Going public* checklist —
-      branch protection, approval for first-time contributors' workflows, GitHub
-      secret scanning, Dependabot
+- [x] 5. Deploy: updater, timer, preflight and health checks implemented; local
+      rollback/data-preservation proof passed; server deployment confirmed by the
+      user on 2026-10-29. Remaining server operational checks are below
+- [x] 6. Docs: quick start, deployment guide, recorded CI/image/deployment results,
+      and a *Going public* checklist; weekly Dependabot config added. Actual GitHub
+      settings and the first Dependabot run remain manual follow-up
 
-### Proof it works
+### Verified and remaining operational checks
 
-- A push with a failing test, a ruff error, or a weakened rule is red — and no
-  image is built.
-- A push to `main` that is green shows up on the home server within about 15
-  minutes, with no command typed there; the Ops dashboard shows the new SHA.
-- A pull request from a fork runs CI and has no access to anything else.
-- Rolling back to the previous SHA and forward again works, data intact.
+- [x] Five CI jobs and image publishing are green at `8119d65`.
+- [x] Public image access was checked; SHA and `main` manifests agreed.
+- [x] Local negative tests reject bad code/scoring, invalid releases and unhealthy
+      versions. The full-stack test and isolated deploy/rollback data proof passed.
+- [x] Home-server deployment works, confirmed by the user on 2026-10-29.
+- [ ] Let the timer deploy a subsequent published commit; confirm the new SHA on
+      **Ops → Running build versions** without a manual server update.
+- [ ] Verify the timer after logout/reboot and rollback/forward on the home server.
+- [ ] After making the repo public, verify protected Markdown-only and fork PRs,
+      workflow approvals, secret scanning and the first Dependabot PR. Full steps
+      are in [Going public](docs/GOING_PUBLIC.md).
 
 ---
 

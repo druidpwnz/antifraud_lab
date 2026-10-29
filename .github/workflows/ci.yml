@@ -6,8 +6,8 @@ on:
     paths-ignore:
       - '**/*.md'
   pull_request:
-    paths-ignore:
-      - '**/*.md'
+    # Required checks must also report on documentation-only PRs. A path-filtered
+    # workflow would leave those PRs pending once main is protected.
   workflow_dispatch:
 
 # No repository secrets or write permissions are needed, including on fork PRs.
