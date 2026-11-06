@@ -1,6 +1,7 @@
 # Going public
 
-The repository was still private when checked on 2026-10-29. The four GHCR packages
+Repository visibility was last checked as private on 2026-10-29; verify current
+settings before using this checklist. The four GHCR packages
 are public and CI/Images have passed. Deployment on the home server was confirmed
 by the user. This checklist prepares a future visibility change; committing it
 does not change GitHub settings.
@@ -79,9 +80,10 @@ downloads only that run's tested image artifact.
   [GitHub: secret scanning](https://docs.github.com/en/code-security/concepts/secret-security/secret-scanning).
 - [ ] Enable the dependency graph, Dependabot alerts and security updates in the
   repository's security settings where available. Version updates are configured
-  in [dependabot.yml](../.github/dependabot.yml) once this change is committed.
-- [ ] Confirm the first Dependabot update run recognizes the manifests and opens
-  PRs; watch **Insights → Dependency graph → Dependabot** for update errors.
+  in [dependabot.yml](../.github/dependabot.yml) in the repository.
+- [x] Initial Dependabot update runs succeeded at `54f0c79` and PRs were created
+  for Ruff and `actions/setup-python`. Watch
+  **Insights → Dependency graph → Dependabot** for future update errors.
 
 Dependabot checks GitHub Actions and Python requirements on Mondays at 09:00
 Europe/Kyiv. Each ecosystem has a two-open-version-PR limit. Action minor/patch
@@ -102,10 +104,11 @@ maintenance items; this configuration does not monitor them.
   can merge after they pass.
 - [ ] Open a PR from a fork and confirm outside-collaborator approval is required
   and no images are published from its run.
-- [ ] After merging a change that triggers image publishing, let the timer pick up
-  the new release and check **Ops → Running build versions** on the server.
+- [x] The timer automatically deployed published release
+  `54f0c79930e6b35a22b0baa1da11fd4a8ff4df27`, confirmed by the user on 2026-10-29.
+  CI and Images both passed for that commit.
 - [ ] On the server, verify the timer after logout/reboot, then perform a rollback
-  and forward update using the [deployment guide](../deploy/README.md). Local
+  and forward update using the [deployment guide](DEPLOYMENT.md). Local
   rollback/data-preservation tests passed; these server checks have not yet been
   separately reported.
 
